@@ -1,11 +1,11 @@
 {
   "name": "xakki/fluent-log",
-  "version": "0.1.3",
+  "version": "0.1.4",
   "description": "Docker Fluent log configs",
   "type": "library",
   "tag": "logger",
   "minimum-stability": "stable",
-  "license": "proprietary",
+  "license": "GPL-3.0-or-later",
   "require": {
     "psr/log": "^3.0"
   },

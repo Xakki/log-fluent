@@ -402,10 +402,13 @@ function normalize_event_time(tag, ts, record)
 
     local changed = false
 
-    -- Non-ISO "datetime" (nginx/keydb/mariadb) breaks the OpenSearch date mapping
-    -- ("Invalid date") — move it to keyword-safe "datetime_raw". Valid ISO8601 stays.
+    -- Non-ISO "datetime" (nginx-error/keydb/mariadb error) — DROP it. Moving it to
+    -- "datetime_raw" backfired: OpenSearch date-detected that field from nginx-error's
+    -- "yyyy/MM/dd HH:mm:ss" values (a default dynamic_date_format), so every non-matching
+    -- value (mariadb "YYYY-MM-DD ...", keydb "DD Mon YYYY ...") failed bulk indexing and
+    -- the WHOLE record was dropped. The numeric GELF timestamp (input ts = driver emission
+    -- time) already carries event time; the printed string is redundant. Valid ISO8601 stays.
     if dt ~= nil and iso == nil then
-        record["datetime_raw"] = dt
         record["datetime"] = nil
         changed = true
     end
