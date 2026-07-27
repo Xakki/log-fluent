@@ -69,7 +69,7 @@ services:
             - "${EXT_FLUENT_PORT:-127.0.0.1:24224}:24224/tcp"
             - "${EXT_FLUENT_METRIC_PORT:-127.0.0.1:2020}:2020" # Metrics port
         volumes:
-            - ./fluent-bit:/fluent-bit/etc:ro
+            - ${FLUENT_PATH:-./fluent-bit}:/fluent-bit/etc:ro
             # Universal NDJSON tail: any *.ndjson here is picked up; filename = service.
             - ${JSON_LOG_PATH:-empty_log_volume}:/var/log/json:ro
             # MariaDB slowlog (mysqld can't write it to stderr).
