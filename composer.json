@@ -1,6 +1,6 @@
 {
   "name": "xakki/fluent-log",
-  "version": "0.1.4",
+  "version": "0.1.5",
   "description": "Docker Fluent log configs",
   "type": "library",
   "tag": "logger",
