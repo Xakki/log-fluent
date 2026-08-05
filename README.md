@@ -193,6 +193,7 @@ Set these in `.env` (see `.env_example`):
 | `TZ`                     | container timezone                              | `UTC` |
 | `JSON_LOG_PATH`          | host dir tailed at `/var/log/json`              | `/var/log/` |
 | `MYSQL_SLOWLOG_PATH`     | host dir tailed at `/var/log/mysql_logs`        | `/var/log/` |
+| `HARBOR_LOG_PATH`        | host dir tailed at `/var/log/harbor` (optional)  | `/var/log/harbor` |
 | `EXT_FLUENT_PORT`        | forward bind (host:port)                        | `127.0.0.1:24224` |
 | `EXT_FLUENT_METRIC_PORT` | metrics/health bind                             | `127.0.0.1:2020` |
 | `GRAYLOG_HOST`           | Graylog GELF/HTTP host                          | `graylog.example.com` |
@@ -211,15 +212,23 @@ HOST_NAME ?= $(shell hostname)
 HOST_IP   ?= $(shell hostname -I 2>/dev/null | awk '{print $$1}' || echo unknown)
 ```
 
-If `JSON_LOG_PATH` / `MYSQL_SLOWLOG_PATH` are unset, empty named volumes are mounted so the
-stack still starts.
+If `JSON_LOG_PATH` / `MYSQL_SLOWLOG_PATH` / `HARBOR_LOG_PATH` are unset, empty named volumes
+are mounted so the stack still starts (the matching tail input simply finds no files).
+
+When `docker-fluent.yml` is pulled into another compose file with `include:`, note that a
+relative path inside it resolves against **this file's** directory, and that the including
+project's `.env` outranks the `env_file:` given on the `include:` entry — pin any clashing
+variable (e.g. `TZ`) in the overriding service block.
 
 ## Log rotation
 
-`logrotate/logrotate.conf` rotates `*.log` (mysql) and `*.ndjson` (json) with
+`logrotate/logrotate.conf` rotates `*.log` (mysql) and `*.ndjson`/`*.json` (json) with
 `copytruncate` — mandatory because fluent-bit holds the file inode open on tail; a rename
 would detach it. Edit the config, then restart the `logrotate` container (it copies the
 config to a root-owned path at startup).
+
+Rotation state lives in the named volume `logrotate_state` (`/logrotate-status`) so it
+survives a container recreate; without it logrotate re-learns every file and skips a cycle.
 
 ## Ports
 
