@@ -69,13 +69,17 @@ services:
             - "${EXT_FLUENT_PORT:-127.0.0.1:24224}:24224/tcp"
             - "${EXT_FLUENT_METRIC_PORT:-127.0.0.1:2020}:2020" # Metrics port
         volumes:
-            # Paths via env: included compose resolves ./ relative to project root
-            # (docker-compose.yml), not this file — set FLUENT_BIT_CONF_DIR in parent Makefile.
+            # Paths via env. When this file is pulled in with `include:`, a relative
+            # path resolves against THIS file's directory (compose v5), not the parent
+            # project root — set the env vars accordingly (README "Configuration").
             - ${FLUENT_BIT_CONF_DIR:-./fluent-bit}:/fluent-bit/etc:ro
-            # Universal NDJSON tail: any *.ndjson here is picked up; filename = service.
+            # Universal NDJSON tail: any *.ndjson (or legacy *.json) here is picked up;
+            # filename = service.
             - ${JSON_LOG_PATH:-empty_log_volume}:/var/log/json:ro
             # MariaDB slowlog (mysqld can't write it to stderr).
             - ${MYSQL_SLOWLOG_PATH:-empty_slowlog_volume}:/var/log/mysql_logs:ro
+            # Harbor log files (harbor-log rsyslog). Unset -> empty volume = no-op.
+            - ${HARBOR_LOG_PATH:-empty_harbor_volume}:/var/log/harbor:ro
             - fluent_bit_state:/var/lib/fluent-bit
         environment:
             - TZ=${TZ}
@@ -102,6 +106,10 @@ services:
             - ${MYSQL_SLOWLOG_PATH:-empty_slowlog_volume}:/var/log/mysql_logs
             - ${JSON_LOG_PATH:-empty_log_volume}:/var/log/json
             - ${FLUENT_LOGROTATE_CONF:-./logrotate/logrotate.conf}:/etc/logrotate.app.conf:ro
+            # The image declares /logrotate-status as a VOLUME: without a NAMED one a
+            # fresh anonymous volume is attached on every recreate and the rotation
+            # state is lost — logrotate then re-learns the files and skips a cycle.
+            - logrotate_state:/logrotate-status
         entrypoint: /bin/sh
         command:
             # The :ro bind-mounted config inherits the host owner (uid != 0) and
@@ -122,5 +130,7 @@ services:
 
 volumes:
     fluent_bit_state:
+    logrotate_state:
     empty_log_volume:
     empty_slowlog_volume:
+    empty_harbor_volume:
