@@ -5,8 +5,6 @@
 -- where the php_fpm_anonymous_identity parser decodes it without a Lua JSON decoder.
 dofile("/fluent-bit/etc/cleanup.lua")
 
-local has_cjson = pcall(require, "cjson")
-
 local function assert_equal(actual, expected, label)
     if actual ~= expected then
         error(label)
@@ -76,23 +74,16 @@ local function run_assertions()
     assert_equal(code, 0, "nonmatching direct event was accepted")
     assert_equal(output["context"] ~= nil, true, "nonmatching direct event was changed")
 
-    -- Legacy wrapper: handled by the parser filter in production. In Lua it is only
-    -- the cjson fallback, which self-disables when the image ships no cjson.
+    -- Legacy wrappers are handled only by the native parser filter in production.
     local wrapped = {
         log = 'NOTICE: PHP message: [debug] {"message":"Anonymous API identity resolved","context":{"auth_identity_type":"anonymous_ip","identity_opaque":true}}',
         log_kind = "native",
     }
     code, output = run(wrapped)
-    if has_cjson then
-        assert_equal(code, 1, "wrapped record was not sanitized with cjson present")
-        assert_equal(output["auth_identity_type"], "anonymous_ip", "wrapped identity type missing")
-        assert_equal(output["log"], nil, "wrapped raw log leaked")
-    else
-        assert_equal(code, 0, "wrapped record was changed without a JSON decoder")
-        assert_equal(output["log"] ~= nil, true, "wrapped record lost its raw log")
-    end
+    assert_equal(code, 0, "unparsed wrapper was accepted")
+    assert_equal(output["log"] ~= nil, true, "unparsed wrapper was changed")
 
-    -- Duplicate/escaped keys stay fail-closed on the cjson path.
+    -- Duplicate/escaped keys stay fail-closed because Lua never decodes wrappers.
     local duplicate = {
         log = 'NOTICE: PHP message: {"message":"Anonymous API identity resolved","context":{"auth_identity_type":"anonymous_ip","auth_identity_type":"anonymous_ip","identity_opaque":true}}',
     }

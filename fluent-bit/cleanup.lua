@@ -2,9 +2,6 @@
 -- See README.md for the full pipeline. Each function is a [FILTER] lua callback.
 
 local _ENV_PROJECT = os.getenv("COMPOSE_PROJECT_NAME") or "?"
--- LuaJIT in the fluent-bit image ships NO cjson: a bare require aborts filter
--- init and takes the whole shipper down. Degrade only the callback that needs it.
-local has_cjson, cjson = pcall(require, "cjson")
 
 -- Canonical docker_* fields for tail-input records (files have no docker driver
 -- labels). host/hostname/docker_profile are set globally by [FILTER] modify Add.
@@ -124,45 +121,6 @@ end
 
 local ANONYMOUS_IDENTITY_EVENT = "Anonymous API identity resolved"
 
-local function php_fpm_json_payload(log)
-    local prefix = "NOTICE: PHP message: "
-    if type(log) ~= "string" or log:sub(1, #prefix) ~= prefix then return nil end
-
-    local payload = log:sub(#prefix + 1)
-    if payload:sub(1, 1) == "[" then
-        local suffix = payload:find("] ", 1, true)
-        if not suffix then return nil end
-        payload = payload:sub(suffix + 2)
-    end
-
-    if payload:sub(1, 1) ~= "{" then return nil end
-    return payload
-end
-
-local function has_ambiguous_json_keys(json)
-    if json:find("\\", 1, true) then return true end
-
-    local seen = {}
-    local pos = 1
-    while true do
-        local start_pos = json:find('"', pos, true)
-        if not start_pos then return false end
-
-        local end_pos = json:find('"', start_pos + 1, true)
-        if not end_pos then return true end
-
-        local next_pos = end_pos + 1
-        while json:sub(next_pos, next_pos):match("%s") do
-            next_pos = next_pos + 1
-        end
-        if json:sub(next_pos, next_pos) == ":" then
-            local key = json:sub(start_pos + 1, end_pos - 1)
-            if seen[key] then return true end
-            seen[key] = true
-        end
-        pos = end_pos + 1
-    end
-end
 
 local function is_exact_anonymous_identity_context(context)
     if type(context) ~= "table"
@@ -207,29 +165,7 @@ function sanitize_php_fpm_anonymous_identity(tag, ts, record)
         return 1, ts, record
     end
 
-    -- Fallback for envelopes the parser above does not cover; needs a JSON decoder,
-    -- which the fluent-bit image's LuaJIT does not ship (see the require at the top).
-    if not has_cjson then return 0, ts, record end
-
-    local json = php_fpm_json_payload(record["log"])
-    if not json then return 0, ts, record end
-
-    -- JSON decoder supplies semantic values; escaped or duplicate keys fail closed.
-    if has_ambiguous_json_keys(json) then
-        return 0, ts, record
-    end
-
-    local ok, decoded = pcall(cjson.decode, json)
-    if not ok or type(decoded) ~= "table" then return 0, ts, record end
-
-    if decoded["message"] ~= ANONYMOUS_IDENTITY_EVENT
-       or not is_exact_anonymous_identity_context(decoded["context"]) then
-        return 0, ts, record
-    end
-
-    -- Export only the typed allowlist; raw JSON and context do not survive.
-    export_anonymous_identity(record)
-    return 1, ts, record
+    return 0, ts, record
 end
 
 -- Normalize level to the Monolog scale (level_name DEBUG..EMERGENCY, level_php
