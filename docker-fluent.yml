@@ -62,6 +62,7 @@ services:
 #                condition: service_started
 
     fluent-bit:
+        init: true
         image: cr.fluentbit.io/fluent/fluent-bit:latest
         container_name: "${COMPOSE_PROJECT_NAME}-fluent-bit"
         ports:
@@ -100,6 +101,7 @@ services:
         cpus: "0.3"
 
     logrotate:
+        init: true
         image: blacklabelops/logrotate
         container_name: "${COMPOSE_PROJECT_NAME}-logrotate"
         volumes:
