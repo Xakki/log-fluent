@@ -13,7 +13,7 @@ local function run(record)
 end
 
 local positive = {
-    log = 'NOTICE: PHP message: [debug] {"message":"Anonymous API identity resolved","context":{"auth_identity_type":"anonymous_ip","identity_opaque":true,"remote_ip":"198.51.100.7"}}',
+    log = 'NOTICE: PHP message: [debug] {"message":"Anonymous API identity resolved","context":{"auth_identity_type":"anonymous_ip","identity_opaque":true}}',
     log_kind = "native",
 }
 local code, output = run(positive)
@@ -22,7 +22,33 @@ assert_equal(output["auth_identity_type"], "anonymous_ip", "missing identity typ
 assert_equal(output["identity_opaque"], true, "missing opaque marker")
 assert_equal(output["log"], nil, "raw wrapper leaked")
 assert_equal(output["log_kind"], nil, "native marker leaked")
-assert_equal(output["remote_ip"], nil, "context field leaked")
+
+-- json_default has already expanded this direct structured PHP record.
+local direct_json = {
+    log = '{"message":"Anonymous API identity resolved","context":{"auth_identity_type":"anonymous_ip","identity_opaque":true}}',
+    message = "Anonymous API identity resolved",
+    context = { auth_identity_type = "anonymous_ip", identity_opaque = true },
+    log_kind = "native",
+    docker_service = "php",
+}
+code, output = run(direct_json)
+assert_equal(code, 1, "direct JSON record was not sanitized")
+assert_equal(output["auth_identity_type"], "anonymous_ip", "direct identity type missing")
+assert_equal(output["identity_opaque"], true, "direct opaque marker missing")
+assert_equal(output["context"], nil, "direct nested context leaked")
+assert_equal(output["log"], nil, "direct raw log leaked")
+assert_equal(output["log_kind"], nil, "direct native marker leaked")
+assert_equal(output["message"], "Anonymous API identity resolved", "direct message was lost")
+assert_equal(output["docker_service"], "php", "standard metadata was lost")
+
+local unknown_direct_context = {
+    message = "Anonymous API identity resolved",
+    context = { auth_identity_type = "anonymous_ip", identity_opaque = true, remote_ip = "198.51.100.7" },
+    docker_service = "php",
+}
+code, output = run(unknown_direct_context)
+assert_equal(code, 0, "unknown direct context was accepted")
+assert_equal(output["context"]["remote_ip"], "198.51.100.7", "unknown direct context changed")
 
 local duplicate = {
     log = 'NOTICE: PHP message: {"message":"Anonymous API identity resolved","context":{"auth_identity_type":"anonymous_ip","auth_identity_type":"anonymous_ip","identity_opaque":true}}',

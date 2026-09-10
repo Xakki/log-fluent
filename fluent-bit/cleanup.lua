@@ -2,7 +2,9 @@
 -- See README.md for the full pipeline. Each function is a [FILTER] lua callback.
 
 local _ENV_PROJECT = os.getenv("COMPOSE_PROJECT_NAME") or "?"
-local cjson = require("cjson")
+-- LuaJIT in the fluent-bit image ships NO cjson: a bare require aborts filter
+-- init and takes the whole shipper down. Degrade only the callback that needs it.
+local has_cjson, cjson = pcall(require, "cjson")
 
 -- Canonical docker_* fields for tail-input records (files have no docker driver
 -- labels). host/hostname/docker_profile are set globally by [FILTER] modify Add.
@@ -162,7 +164,40 @@ local function has_ambiguous_json_keys(json)
     end
 end
 
+local function is_exact_anonymous_identity_context(context)
+    if type(context) ~= "table"
+       or context["auth_identity_type"] ~= "anonymous_ip"
+       or context["identity_opaque"] ~= true then
+        return false
+    end
+
+    for key in pairs(context) do
+        if key ~= "auth_identity_type" and key ~= "identity_opaque" then
+            return false
+        end
+    end
+    return true
+end
+
+local function export_anonymous_identity(record)
+    record["auth_identity_type"] = "anonymous_ip"
+    record["identity_opaque"] = true
+    record["context"] = nil
+    record["log"] = nil
+    record["log_kind"] = nil
+    return 1
+end
+
 function sanitize_php_fpm_anonymous_identity(tag, ts, record)
+    if not has_cjson then return 0, ts, record end
+
+    -- json_default expands direct JSON before this service filter runs.
+    if record["message"] == ANONYMOUS_IDENTITY_EVENT
+       and is_exact_anonymous_identity_context(record["context"]) then
+        export_anonymous_identity(record)
+        return 1, ts, record
+    end
+
     local json = php_fpm_json_payload(record["log"])
     if not json then return 0, ts, record end
 
@@ -174,19 +209,13 @@ function sanitize_php_fpm_anonymous_identity(tag, ts, record)
     local ok, decoded = pcall(cjson.decode, json)
     if not ok or type(decoded) ~= "table" then return 0, ts, record end
 
-    local context = decoded["context"]
     if decoded["message"] ~= ANONYMOUS_IDENTITY_EVENT
-       or type(context) ~= "table"
-       or context["auth_identity_type"] ~= "anonymous_ip"
-       or context["identity_opaque"] ~= true then
+       or not is_exact_anonymous_identity_context(decoded["context"]) then
         return 0, ts, record
     end
 
-    -- Экспортируется только typed allowlist; raw JSON и context не переживают callback.
-    record["auth_identity_type"] = "anonymous_ip"
-    record["identity_opaque"] = true
-    record["log"] = nil
-    record["log_kind"] = nil
+    -- Export only the typed allowlist; raw JSON and context do not survive.
+    export_anonymous_identity(record)
     return 1, ts, record
 end
 
