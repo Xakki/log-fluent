@@ -189,7 +189,16 @@ local function export_anonymous_identity(record)
 end
 
 function sanitize_php_fpm_anonymous_identity(tag, ts, record)
-    if not has_cjson then return 0, ts, record end
+    -- The php_fpm_anonymous_identity parser (service.d/php.conf) already decoded the
+    -- legacy envelope natively: typed fields present, raw wrapper gone. Types casts
+    -- identity_opaque to a boolean; accept the string form too if that cast is lost.
+    if record["auth_identity_type"] == "anonymous_ip"
+       and (record["identity_opaque"] == true or record["identity_opaque"] == "true")
+       and record["log"] == nil and record["message"] == nil then
+        record["identity_opaque"] = true
+        record["log_kind"] = nil
+        return 1, ts, record
+    end
 
     -- json_default expands direct JSON before this service filter runs.
     if record["message"] == ANONYMOUS_IDENTITY_EVENT
@@ -197,6 +206,10 @@ function sanitize_php_fpm_anonymous_identity(tag, ts, record)
         export_anonymous_identity(record)
         return 1, ts, record
     end
+
+    -- Fallback for envelopes the parser above does not cover; needs a JSON decoder,
+    -- which the fluent-bit image's LuaJIT does not ship (see the require at the top).
+    if not has_cjson then return 0, ts, record end
 
     local json = php_fpm_json_payload(record["log"])
     if not json then return 0, ts, record end
