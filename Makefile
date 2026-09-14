@@ -6,47 +6,39 @@ FLUENT_BIT_IMAGE ?= cr.fluentbit.io/fluent/fluent-bit:5.0.9
 RUN_LIMITS       ?= --memory 128m --cpus 0.5
 RUN_MOUNT        ?= -v "$(CURDIR)/fluent-bit:/fluent-bit/etc:ro"
 
-.PHONY: test fluent-bit-cnv143-test fluent-bit-anonid-pipeline-test fluent-bit-config-check fluent-bit-contract-test
+.PHONY: test fluent-bit-php-json-pipeline-test fluent-bit-config-check fluent-bit-contract-test
 
-test: fluent-bit-cnv143-test fluent-bit-anonid-pipeline-test fluent-bit-config-check fluent-bit-contract-test ## Run every fluent-bit check
+test: fluent-bit-php-json-pipeline-test fluent-bit-config-check fluent-bit-contract-test ## Run every fluent-bit check
 
-# Unit assertions for the sanitize_php_fpm_anonymous_identity callback. stdin input +
-# Exit_On_Eof: the process ends by itself; a failed assertion aborts filter init instead
-# of emitting the marker record.
-fluent-bit-cnv143-test: ## Lua allowlist unit test
-	@output=$$(printf '{"message":"synthetic"}\n' | docker run --rm -i --network none \
-		$(RUN_LIMITS) $(RUN_MOUNT) "$(FLUENT_BIT_IMAGE)" \
-		-c /fluent-bit/etc/tests/anonymous-identity-selftest.conf 2>&1); \
-	case "$$output" in \
-		*'cnv143_assertions'*) echo "cnv143 selftest: OK" ;; \
-		*) printf '%s\n' "$$output" >&2; exit 1 ;; \
-	esac
-
-# End-to-end: real parsers.conf + parser filter + Lua allowlist over three synthetic
+# End-to-end: real parsers.conf + production PHP filters over four synthetic
 # records (see the conf header). Runs until the timeout — dummy inputs never EOF.
-fluent-bit-anonid-pipeline-test: ## Anonymous-identity pipeline test
+fluent-bit-php-json-pipeline-test: ## Generic PHP-FPM wrapped JSON pipeline test
 	@output=$$(timeout 6 docker run --rm --network none $(RUN_LIMITS) $(RUN_MOUNT) \
-		"$(FLUENT_BIT_IMAGE)" -c /fluent-bit/etc/tests/anonymous-identity-pipeline.conf 2>&1); \
+		"$(FLUENT_BIT_IMAGE)" -c /fluent-bit/etc/tests/php-fpm-json-pipeline.conf 2>&1); \
 	fail() { printf '%s\n%s\n' "$$1" "$$output" >&2; exit 1; }; \
-	sanitized=$$(printf '%s\n' "$$output" | grep '"auth_identity_type":"anonymous_ip"' || true); \
-	[ "$$(printf '%s\n' "$$output" | grep -c '"short_message":"Anonymous API identity resolved"')" = 2 ] \
-		|| fail "expected exactly 2 canonical sanitized messages"; \
-	[ "$$(printf '%s\n' "$$output" | grep -c '"auth_identity_type":"anonymous_ip"')" = 2 ] \
-		|| fail "expected exactly 2 sanitized records"; \
-	printf '%s\n' "$$sanitized" | grep -q '"identity_opaque":true' || fail "identity_opaque is not a boolean"; \
-	[ "$$(printf '%s\n' "$$output" | grep -c '"short_message":"NOTICE: PHP message.*remote_ip')" = 1 ] \
-		|| fail "record with an extra context key was not preserved"; \
-	printf '%s\n' "$$output" | grep -q '"short_message":"-"' \
-		&& fail "sanitized record lost its canonical event name"; \
-	printf '%s\n' "$$sanitized" | grep -q 'log_kind' \
-		&& fail "native marker leaked into pipeline output"; \
-	printf '%s\n' "$$sanitized" | grep -q 'anonid_parser_marker' \
-		&& fail "parser marker leaked into pipeline output"; \
-	printf '%s\n' "$$sanitized" | grep -q 'context_' \
-		&& fail "nested context leaked into pipeline output"; \
-	printf '%s\n' "$$sanitized" | grep -q '"log"' \
-		&& fail "raw wrapper leaked into pipeline output"; \
-	echo "anonid pipeline: OK"
+	wrapped=$$(printf '%s\n' "$$output" | grep '"short_message":"Wrapped JSON event"' || true); \
+	direct=$$(printf '%s\n' "$$output" | grep '"short_message":"Direct JSON event"' || true); \
+	[ "$$(printf '%s\n' "$$wrapped" | grep -c '"short_message"')" = 1 ] \
+		|| fail "expected one decoded wrapped JSON event"; \
+	printf '%s\n' "$$wrapped" | grep -q '"context_safe_flag":true' \
+		|| fail "wrapped JSON boolean field was not preserved"; \
+	printf '%s\n' "$$wrapped" | grep -q '"context_sequence":7' \
+		|| fail "wrapped JSON integer field was not preserved"; \
+	printf '%s\n' "$$wrapped" | grep -q '"level_name":"INFO"' \
+		|| fail "wrapped JSON level was not preserved"; \
+	printf '%s\n' "$$wrapped" | grep -q '"log_kind"' \
+		&& fail "decoded wrapped JSON remained marked native"; \
+	printf '%s\n' "$$wrapped" | grep -q '"log"' \
+		&& fail "decoded wrapped JSON retained its raw envelope"; \
+	printf '%s\n' "$$direct" | grep -q '"context_safe_flag":true' \
+		|| fail "direct JSON behavior regressed"; \
+	[ "$$(printf '%s\n' "$$output" | grep -c '"short_message":"NOTICE: PHP message: not-json"')" = 1 ] \
+		|| fail "non-JSON PHP-FPM output was not preserved"; \
+	printf '%s\n' "$$output" | grep '"short_message":"NOTICE: PHP message: not-json"' | grep -q '"log_kind":"native"' \
+		|| fail "non-JSON PHP-FPM output lost its native marker"; \
+	printf '%s\n' "$$output" | grep '"short_message":"{not-json}"' | grep -q '"log_kind":"native"' \
+		|| fail "malformed wrapped JSON was not preserved as native output"; \
+	echo "php json pipeline: OK"
 
 fluent-bit-contract-test: ## Test fail-closed shell and native parser contracts
 	@./fluent-bit/tests/makefile-config-check-test.sh

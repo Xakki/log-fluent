@@ -23,6 +23,14 @@ if grep -Eq 'cjson|php_fpm_json_payload|has_ambiguous_json_keys' \
     exit 1
 fi
 
+if grep -Eqi 'anonymous[ _-]?identity|anonid|auth_identity_type|identity_opaque' \
+    "$repo_dir/fluent-bit/cleanup.lua" \
+    "$repo_dir/fluent-bit/parsers.conf" \
+    "$repo_dir/fluent-bit/service.d/php.conf"; then
+    printf '%s\n' 'shared Fluent Bit config contains an application-specific identity contract' >&2
+    exit 1
+fi
+
 if PATH="$fake_bin:$PATH" DOCKER_STATUS=1 DOCKER_OUTPUT='configuration test is successful' \
     make -s -C "$repo_dir" fluent-bit-config-check \
     FLUENT_BIT_IMAGE=test-image RUN_LIMITS= RUN_MOUNT=; then
