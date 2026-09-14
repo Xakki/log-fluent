@@ -120,6 +120,7 @@ function tag_native_stderr(tag, ts, record)
 end
 
 local ANONYMOUS_IDENTITY_EVENT = "Anonymous API identity resolved"
+local ANONYMOUS_IDENTITY_PARSER_MARKER = "NOTICE: PHP message: "
 
 
 local function is_exact_anonymous_identity_context(context)
@@ -147,13 +148,17 @@ local function export_anonymous_identity(record)
 end
 
 function sanitize_php_fpm_anonymous_identity(tag, ts, record)
-    -- The php_fpm_anonymous_identity parser (service.d/php.conf) already decoded the
-    -- legacy envelope natively: typed fields present, raw wrapper gone. Types casts
-    -- identity_opaque to a boolean; accept the string form too if that cast is lost.
-    if record["auth_identity_type"] == "anonymous_ip"
+    -- The parser handoff is accepted only with every exact native-path marker.
+    -- Keep message for normalize_event_time to promote it to GELF short_message.
+    if record["anonid_parser_marker"] == ANONYMOUS_IDENTITY_PARSER_MARKER
+       and record["message"] == ANONYMOUS_IDENTITY_EVENT
+       and record["auth_identity_type"] == "anonymous_ip"
        and (record["identity_opaque"] == true or record["identity_opaque"] == "true")
-       and record["log"] == nil and record["message"] == nil then
+       and record["log"] == nil
+       and record["context"] == nil
+       and record["log_kind"] == "native" then
         record["identity_opaque"] = true
+        record["anonid_parser_marker"] = nil
         record["log_kind"] = nil
         return 1, ts, record
     end

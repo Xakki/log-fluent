@@ -28,17 +28,24 @@ fluent-bit-anonid-pipeline-test: ## Anonymous-identity pipeline test
 	@output=$$(timeout 6 docker run --rm --network none $(RUN_LIMITS) $(RUN_MOUNT) \
 		"$(FLUENT_BIT_IMAGE)" -c /fluent-bit/etc/tests/anonymous-identity-pipeline.conf 2>&1); \
 	fail() { printf '%s\n%s\n' "$$1" "$$output" >&2; exit 1; }; \
+	sanitized=$$(printf '%s\n' "$$output" | grep '"auth_identity_type":"anonymous_ip"' || true); \
+	[ "$$(printf '%s\n' "$$output" | grep -c '"short_message":"Anonymous API identity resolved"')" = 2 ] \
+		|| fail "expected exactly 2 canonical sanitized messages"; \
 	[ "$$(printf '%s\n' "$$output" | grep -c '"auth_identity_type":"anonymous_ip"')" = 2 ] \
 		|| fail "expected exactly 2 sanitized records"; \
-	printf '%s\n' "$$output" | grep -q '"identity_opaque":true' || fail "identity_opaque is not a boolean"; \
-	printf '%s\n' "$$output" | grep -q '"log":"NOTICE: PHP message.*remote_ip' \
-		|| fail "record with an extra context key must pass through untouched"; \
-	[ "$$(printf '%s\n' "$$output" | grep -c '"log":"NOTICE: PHP message')" = 1 ] \
-		|| fail "unparsed wrapper was not preserved exactly once"; \
-	printf '%s\n' "$$output" | grep '"auth_identity_type"' | grep -q 'remote_ip' \
-		&& fail "context leaked into a sanitized record"; \
-	printf '%s\n' "$$output" | grep '"auth_identity_type"' | grep -q 'log_kind' \
-		&& fail "native marker leaked into a sanitized record"; \
+	printf '%s\n' "$$sanitized" | grep -q '"identity_opaque":true' || fail "identity_opaque is not a boolean"; \
+	[ "$$(printf '%s\n' "$$output" | grep -c '"short_message":"NOTICE: PHP message.*remote_ip')" = 1 ] \
+		|| fail "record with an extra context key was not preserved"; \
+	printf '%s\n' "$$output" | grep -q '"short_message":"-"' \
+		&& fail "sanitized record lost its canonical event name"; \
+	printf '%s\n' "$$sanitized" | grep -q 'log_kind' \
+		&& fail "native marker leaked into pipeline output"; \
+	printf '%s\n' "$$sanitized" | grep -q 'anonid_parser_marker' \
+		&& fail "parser marker leaked into pipeline output"; \
+	printf '%s\n' "$$sanitized" | grep -q 'context_' \
+		&& fail "nested context leaked into pipeline output"; \
+	printf '%s\n' "$$sanitized" | grep -q '"log"' \
+		&& fail "raw wrapper leaked into pipeline output"; \
 	echo "anonid pipeline: OK"
 
 fluent-bit-contract-test: ## Test fail-closed shell and native parser contracts

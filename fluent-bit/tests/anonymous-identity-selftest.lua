@@ -22,12 +22,16 @@ local function run_assertions()
     local parsed = {
         auth_identity_type = "anonymous_ip",
         identity_opaque = true,
+        message = "Anonymous API identity resolved",
+        anonid_parser_marker = "NOTICE: PHP message: ",
         log_kind = "native",
         docker_service = "php",
     }
     local code, output = run(parsed)
     assert_equal(code, 1, "natively parsed record was not accepted")
     assert_equal(output["identity_opaque"], true, "parsed opaque marker missing")
+    assert_equal(output["message"], "Anonymous API identity resolved", "parsed event name was lost")
+    assert_equal(output["anonid_parser_marker"], nil, "parser marker leaked")
     assert_equal(output["log_kind"], nil, "parsed native marker leaked")
     assert_equal(output["docker_service"], "php", "parsed metadata was lost")
 
@@ -35,11 +39,35 @@ local function run_assertions()
     local parsed_string_bool = {
         auth_identity_type = "anonymous_ip",
         identity_opaque = "true",
+        message = "Anonymous API identity resolved",
+        anonid_parser_marker = "NOTICE: PHP message: ",
         log_kind = "native",
     }
     code, output = run(parsed_string_bool)
     assert_equal(code, 1, "string-boolean record was not accepted")
     assert_equal(output["identity_opaque"], true, "string boolean was not normalized")
+    assert_equal(output["message"], "Anonymous API identity resolved", "string-boolean event name was lost")
+    assert_equal(output["anonid_parser_marker"], nil, "string-boolean parser marker leaked")
+    assert_equal(output["log_kind"], nil, "string-boolean native marker leaked")
+
+    -- Promoted top-level fields alone do not prove the native parser ran.
+    local direct_top_level = {
+        auth_identity_type = "anonymous_ip",
+        identity_opaque = true,
+        remote_ip = "198.51.100.7",
+    }
+    code, output = run(direct_top_level)
+    assert_equal(code, 0, "direct top-level identity was accepted as native")
+    assert_equal(output["remote_ip"], "198.51.100.7", "direct top-level record changed")
+
+    local direct_top_level_event = {
+        auth_identity_type = "anonymous_ip",
+        identity_opaque = true,
+        message = "Anonymous API identity resolved",
+    }
+    code, output = run(direct_top_level_event)
+    assert_equal(code, 0, "direct top-level event was accepted as native")
+    assert_equal(output["message"], "Anonymous API identity resolved", "direct top-level event changed")
 
     -- json_default has already expanded this direct structured PHP record.
     local direct_json = {
