@@ -121,6 +121,10 @@ tail mariadb slowlog ───┘          └─ level / timestamp / GELF-flatt
    flatten nested maps/arrays into `parent_child` keys (GELF has no nested fields).
 7. **Output** GELF over HTTPS to Graylog; `internal_metrics` to a Prometheus exporter.
 
+Application-specific privacy and field allowlists belong to the producer. This bundle parses and
+normalizes structured records but does not recognize event names or decide which domain fields an
+application may emit.
+
 ## Routing by `log_format`
 
 `log_format` selects the parser set; it is **not** tied to the container or service name.
@@ -144,7 +148,7 @@ stays in `docker_service`.
 
 | `log_format`      | Source                                  | Parsing |
 |-------------------|-----------------------------------------|---------|
-| `php`             | PHP/Monolog (JSON) + raw stderr         | JSON; multiline join of Fatal/Stack trace/dumps; fpm noise dropped |
+| `php`             | PHP/Monolog (JSON) + raw stderr         | direct or PHP-FPM-wrapped JSON; multiline Fatal/Stack trace/dumps; fpm noise dropped |
 | `nginx`           | access JSON + error text                | request split; error-tail fields (client/upstream/…) |
 | `mariadb`         | error log (stderr)                      | multiline join; record regex |
 | `redis`           | Redis / KeyDB                           | line regex |
