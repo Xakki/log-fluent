@@ -1,4 +1,4 @@
-# fluent-log
+# log-fluent
 
 Drop-in [fluent-bit](https://fluentbit.io/) configuration that ships Docker container
 logs and on-disk log files to [Graylog](https://www.graylog.org/) over GELF, and exposes
@@ -25,14 +25,14 @@ Vendor the bundle one of two ways:
 ### A) Composer (PHP projects)
 
 ```sh
-composer require xakki/fluent-log
+composer require xakki/log-fluent
 ```
 
-Lands at `vendor/xakki/fluent-log/`. In your logging overlay:
+Lands at `vendor/xakki/log-fluent/`. In your logging overlay:
 
 ```yaml
 include:
-    - vendor/xakki/fluent-log/docker-fluent.yml
+    - vendor/xakki/log-fluent/docker-fluent.yml
 ```
 
 Companion PHP loggers that emit the structured logs this config expects:
@@ -45,18 +45,18 @@ Companion PHP loggers that emit the structured logs this config expects:
 For projects without Composer. Pin a release tag:
 
 ```sh
-git submodule add https://github.com/Xakki/FluentLog.git infra/fluent-log
-git -C infra/fluent-log checkout v0.1.3
+git submodule add https://github.com/Xakki/FluentLog.git infra/log-fluent
+git -C infra/log-fluent checkout v0.1.3
 ```
 
 ```yaml
 include:
-    - infra/fluent-log/docker-fluent.yml
+    - infra/log-fluent/docker-fluent.yml
 ```
 
 A fresh clone must hydrate the submodule (the include path is empty otherwise and compose
 fails): `git clone --recurse-submodules`, or `git submodule update --init --recursive`. In
-GitLab/GitHub CI set `GIT_SUBMODULE_STRATEGY: recursive`. Bump = `git -C infra/fluent-log
+GitLab/GitHub CI set `GIT_SUBMODULE_STRATEGY: recursive`. Bump = `git -C infra/log-fluent
 checkout <newtag>` then commit the submodule pointer.
 
 ### The overlay (both cases)
@@ -65,7 +65,7 @@ Keep **only** the anchor + per-service labels in your file:
 
 ```yaml
 include:
-    - infra/fluent-log/docker-fluent.yml          # or vendor/xakki/fluent-log/...
+    - infra/log-fluent/docker-fluent.yml          # or vendor/xakki/log-fluent/...
 
 x-logging: &_logging
     logging:

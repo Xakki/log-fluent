@@ -1,5 +1,5 @@
 {
-  "name": "xakki/fluent-log",
+  "name": "xakki/log-fluent",
   "description": "Docker Fluent log configs",
   "type": "library",
   "tag": "logger",
