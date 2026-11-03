@@ -227,6 +227,25 @@ relative path inside it resolves against **this file's** directory, and that the
 project's `.env` outranks the `env_file:` given on the `include:` entry — pin any clashing
 variable (e.g. `TZ`) in the overriding service block.
 
+## Docker-less hosts (binary agent)
+
+A host with no docker (e.g. a bare nginx edge) runs the package `fluent-bit` (same version as the
+image, currently 5.1.5) with `fluent-bit/host-agent.conf`: it tails `/var/log/nginx/*.log`
+(`stream-sni.log` excluded), applies the same `cleanup.lua` / `service.d/nginx.conf` path as the
+container pipeline and ships GELF over HTTPS, so records land in the same Graylog streams.
+
+```
+git clone --branch <tag> https://github.com/Xakki/log-fluent.git /opt/log-fluent
+ln -sfn /opt/log-fluent/fluent-bit /fluent-bit/etc      # lua/parser paths are absolute
+# /etc/log-fluent-agent.env: GRAYLOG_HOST GRAYLOG_PORT GRAYLOG_URI HOST_NAME HOST_IP COMPOSE_PROFILES
+# systemd unit: ExecStart=/opt/fluent-bit/bin/fluent-bit -c /fluent-bit/etc/host-agent.conf
+```
+
+nginx side: `include /opt/log-fluent/nginx/access_log_format;` then
+`access_log /var/log/nginx/access.log json_combined;` (add `if=$flag` to skip static files or
+proxied requests). Upgrade = `git -C /opt/log-fluent checkout <newtag>` + restart the unit.
+Deployed on saMirror and saBots.
+
 ## Log rotation
 
 `logrotate/logrotate.conf` rotates `*.log` (mysql) and `*.ndjson`/`*.json` (json) with
