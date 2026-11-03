@@ -131,6 +131,19 @@ function normalize_nginx_access(tag, ts, record)
     return 1, ts, record
 end
 
+-- Drop fields that repeat another field of the same record.
+function dedupe_nginx_fields(tag, ts, record)
+    local changed = false
+    if record["realip_remote_addr"] ~= nil and record["realip_remote_addr"] == record["remote_addr"] then
+        record["realip_remote_addr"] = nil; changed = true
+    end
+    if record["server_name"] ~= nil and record["server_name"] == record["request_host"] then
+        record["server_name"] = nil; changed = true
+    end
+    if record["server_name"] == "_" then record["server_name"] = nil; changed = true end
+    return changed and 1 or 0, ts, record
+end
+
 -- Internal / system endpoints that are polled constantly and carry no signal:
 -- log delivery, health, metrics exporters, Graylog UI polling, worker control
 -- plane. They are dropped only when healthy and fast; errors and slow calls stay.
@@ -175,6 +188,59 @@ function drop_nginx_error_noise(tag, ts, record)
     return 0, ts, record
 end
 
+-- ---------------------------------------------------------------------------
+-- Invalid UTF-8 in raw nginx lines (escape=json passes bytes >= 0x80 through).
+-- Runs BEFORE the global JSON parser, which would silently drop or mangle them.
+-- Every byte that is not part of a valid UTF-8 sequence becomes %XX, so the
+-- request stays readable and lossless. Pure Lua 5.1 (LuaJIT has no utf8 library).
+-- ---------------------------------------------------------------------------
+local function _cont(b) return b ~= nil and b >= 0x80 and b <= 0xBF end
+
+local function _utf8_seq_len(s, i)
+    local b1 = string.byte(s, i)
+    if b1 < 0x80 then return 1 end
+    local b2, b3, b4 = string.byte(s, i + 1, i + 3)
+    if b1 >= 0xC2 and b1 <= 0xDF then
+        return _cont(b2) and 2 or nil
+    elseif b1 == 0xE0 then
+        return (b2 and b2 >= 0xA0 and b2 <= 0xBF and _cont(b3)) and 3 or nil
+    elseif b1 == 0xED then
+        return (b2 and b2 >= 0x80 and b2 <= 0x9F and _cont(b3)) and 3 or nil
+    elseif b1 >= 0xE1 and b1 <= 0xEF then
+        return (_cont(b2) and _cont(b3)) and 3 or nil
+    elseif b1 == 0xF0 then
+        return (b2 and b2 >= 0x90 and b2 <= 0xBF and _cont(b3) and _cont(b4)) and 4 or nil
+    elseif b1 >= 0xF1 and b1 <= 0xF3 then
+        return (_cont(b2) and _cont(b3) and _cont(b4)) and 4 or nil
+    elseif b1 == 0xF4 then
+        return (b2 and b2 >= 0x80 and b2 <= 0x8F and _cont(b3) and _cont(b4)) and 4 or nil
+    end
+    return nil
+end
+
+function sanitize_invalid_utf8(tag, ts, record)
+    local s = record["log"]
+    if type(s) ~= "string" or not string.find(s, "[\128-\255]") then
+        return 0, ts, record
+    end
+    local out, n, i, len, changed = {}, 0, 1, #s, false
+    while i <= len do
+        local l = _utf8_seq_len(s, i)
+        n = n + 1
+        if l then
+            out[n] = string.sub(s, i, i + l - 1)
+            i = i + l
+        else
+            out[n] = string.format("%%%02X", string.byte(s, i))
+            i = i + 1
+            changed = true
+        end
+    end
+    if not changed then return 0, ts, record end
+    record["log"] = table.concat(out)
+    return 1, ts, record
+end
+
 -- Split the nginx error "tail" (", client: <ip>, server: ..., request: \"...\"")
 -- into discrete fields. Done in Lua: a single optional-group regex backtracks
 -- badly in Onigmo. message keeps only the error description.
@@ -206,16 +272,17 @@ function parse_nginx_error_context(tag, ts, record)
     if host then record["request_host"] = host end
 
     local referrer = string.match(tail, 'referrer: "([^"]*)"')
-    if referrer then record["referrer"] = referrer end
+    if referrer then record["referer"] = referrer end
 
     local upstream = string.match(tail, 'upstream: "([^"]*)"')
     if upstream then record["upstream"] = upstream end
 
+    -- Same names as the access log: remote_addr / server_name.
     local client = string.match(tail, "client: ([^,]+)")
-    if client then record["client"] = client end
+    if client then record["remote_addr"] = client end
 
     local server = string.match(tail, "server: ([^,]+)")
-    if server then record["server"] = server end
+    if server then record["server_name"] = server end
 
     return 1, ts, record
 end
@@ -538,6 +605,12 @@ function normalize_event_time(tag, ts, record)
 
     if _coalesce_short_message(record) then
         changed = true
+    end
+
+    -- time_local is only the source of the event time (nginx): once it became the
+    -- record timestamp it is a duplicate.
+    if new_ts and iso == nil and record["time_local"] ~= nil then
+        record["time_local"] = nil
     end
 
     if new_ts then
