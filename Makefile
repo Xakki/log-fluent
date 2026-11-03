@@ -36,6 +36,8 @@ fluent-bit-host-nginx-test: ## host nginx tail test
 	[ "$$(printf '%s\n' "$$output" | grep -c '"docker_service":"host-nginx"')" = 2 ] || fail "expected 2 host-nginx records"; \
 	printf '%s\n' "$$output" | grep '"request_uri":"/go"' | grep -q '"remote_addr":"1.2.3.4"' || fail "host access line was not parsed"; \
 	printf '%s\n' "$$output" | grep '"request_uri":"/x"' | grep -q '"remote_addr":"5.6.7.8"' || fail "host error context was not parsed"; \
+	printf '%s\n' "$$output" | grep '"request_uri":"/go"' | grep -q '"log_source":"stdout"' || fail "host access must look like stdout"; \
+	printf '%s\n' "$$output" | grep '"request_uri":"/x"' | grep -q '"log_source":"stderr"' || fail "host error must look like stderr"; \
 	if printf '%s\n' "$$output" | grep -q '"file":'; then fail "tail Path_Key leaked"; fi; \
 	echo "host nginx: OK"
 

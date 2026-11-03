@@ -621,3 +621,10 @@ function normalize_event_time(tag, ts, record)
     end
     return 0, ts, record
 end
+
+-- Host (non-docker) nginx: derive the docker-like log_source from the record kind.
+function host_nginx_stream(tag, ts, record)
+    if record["docker_service"] ~= "host-nginx" then return 0, ts, record end
+    if record["status"] ~= nil then record["log_source"] = "stdout" else record["log_source"] = "stderr" end
+    return 1, ts, record
+end
