@@ -2,13 +2,49 @@
 # not load Lua scripts or initialize filters, so a broken script still reports
 # "configuration test is successful" (that is how the missing-cjson crash reached prod).
 # Every one-off container: --rm + explicit mem/cpu limits.
-FLUENT_BIT_IMAGE ?= cr.fluentbit.io/fluent/fluent-bit:5.0.9
+FLUENT_BIT_IMAGE ?= harbor.xakki.ru/external/fluent-bit:5
 RUN_LIMITS       ?= --memory 128m --cpus 0.5
 RUN_MOUNT        ?= -v "$(CURDIR)/fluent-bit:/fluent-bit/etc:ro"
 
-.PHONY: test fluent-bit-php-json-pipeline-test fluent-bit-config-check fluent-bit-contract-test
+# Project-specific third-party image: mirrored by `make harbor-pub` into the shared Harbor
+# project `library`. docker-fluent.yml reads LOGROTATE_IMAGE.
+HARBOR_REGISTRY ?= harbor.xakki.ru
+HARBOR_PROJECT  ?= library
+LOGROTATE_SRC   ?= blacklabelops/logrotate:latest
+LOGROTATE_DST   ?= $(HARBOR_REGISTRY)/$(HARBOR_PROJECT)/logrotate:latest
 
-test: fluent-bit-php-json-pipeline-test fluent-bit-config-check fluent-bit-contract-test ## Run every fluent-bit check
+.PHONY: test fluent-bit-nginx-pipeline-test fluent-bit-php-json-pipeline-test fluent-bit-config-check fluent-bit-contract-test harbor-pub
+
+test: fluent-bit-nginx-pipeline-test fluent-bit-php-json-pipeline-test fluent-bit-config-check fluent-bit-contract-test ## Run every fluent-bit check
+
+# End-to-end nginx normalization: legacy keys, request_line, numeric coercion, noise drop.
+fluent-bit-nginx-pipeline-test: ## nginx access/error normalization and noise filter test
+	@output=$$(timeout 6 docker run --rm --network none $(RUN_LIMITS) $(RUN_MOUNT) \
+		"$(FLUENT_BIT_IMAGE)" -c /fluent-bit/etc/tests/nginx-pipeline.conf 2>&1); \
+	fail() { printf '%s\n%s\n' "$$1" "$$output" >&2; exit 1; }; \
+	[ "$$(printf '%s\n' "$$output" | grep -c '"short_message"')" = 5 ] \
+		|| fail "expected 5 surviving records (3 access + 1 failing system call + 1 error)"; \
+	printf '%s\n' "$$output" | grep '"request_uri":"/orders"' | grep -q '"user_agent":"UA/1"' \
+		|| fail "legacy http_user_agent was not renamed"; \
+	printf '%s\n' "$$output" | grep '"request_uri":"/orders"' | grep -q '"request_host":"a.example"' \
+		|| fail "legacy http_host was not renamed to request_host"; \
+	printf '%s\n' "$$output" | grep '"request_uri":"/orders"' | grep -q '"request_time":0.123' \
+		|| fail "request_time was not coerced to a number"; \
+	printf '%s\n' "$$output" | grep '"request_uri":"/orders"' | grep -q '"upstream_response_time":0.02' \
+		|| fail "multi-value upstream time was not reduced to the last value"; \
+	printf '%s\n' "$$output" | grep '"request_uri":"/api/v1/convert?x=1"' | grep -q '"request_method":"POST"' \
+		|| fail "request_line was not split into request_method"; \
+	if printf '%s\n' "$$output" | grep -q 'command-pending'; then fail "healthy system endpoint was not dropped"; fi; \
+	printf '%s\n' "$$output" | grep '"request_uri":"/gelf"' | grep -q '"status":502' \
+		|| fail "failing system endpoint was dropped"; \
+	if printf '%s\n' "$$output" | grep -q 'SIGCHLD'; then fail "notice-level error was not dropped"; fi; \
+	if printf '%s\n' "$$output" | grep -q 'buffered to a temporary file'; then fail "buffering noise was not dropped"; fi; \
+	printf '%s\n' "$$output" | grep '"request_uri":"/x"' | grep -q '"request_method":"GET"' \
+		|| fail "error-log request context was not parsed"; \
+	echo "nginx pipeline: OK"
+
+harbor-pub: ## Mirror the logrotate image (all platforms) into Harbor library; needs docker login
+	docker buildx imagetools create -t $(LOGROTATE_DST) $(LOGROTATE_SRC)
 
 # End-to-end: real parsers.conf + production PHP filters over four synthetic
 # records (see the conf header). Runs until the timeout — dummy inputs never EOF.

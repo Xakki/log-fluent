@@ -66,6 +66,115 @@ function route_unknown(tag, ts, record)
     return 1, ts, record
 end
 
+-- ---------------------------------------------------------------------------
+-- nginx access: one canonical record shape for every project/host.
+-- Canonical keys: message ("GET /uri HTTP/1.1" -> request_method/uri/proto),
+-- request_host, server_name, remote_addr, realip_remote_addr, status (num),
+-- request_time/upstream_*_time (num), request_length, body_bytes_sent,
+-- user_agent, referer, x_forwarded_for. Legacy project formats are renamed here
+-- so that old and new nginx configs land in Graylog identically.
+-- ---------------------------------------------------------------------------
+local NGINX_KEY_ALIAS = {
+    http_user_agent       = "user_agent",
+    http_referrer         = "referer",
+    http_referer          = "referer",
+    http_x_forwarded_for  = "x_forwarded_for",
+    http_host             = "request_host",
+    host_header           = "request_host",
+}
+local NGINX_NUMERIC = {
+    status = true, body_bytes_sent = true, request_length = true,
+    request_time = true, upstream_connect_time = true,
+    upstream_header_time = true, upstream_response_time = true,
+}
+
+local function _nginx_to_number(v)
+    if type(v) == "number" then return v end
+    if type(v) ~= "string" then return nil end
+    -- "0.001, 0.004" / "0.001 : 0.002" (retries / internal redirects): keep the last.
+    local last
+    for n in string.gmatch(v, "[%d%.]+") do last = n end
+    return last and tonumber(last) or nil
+end
+
+function normalize_nginx_access(tag, ts, record)
+    for old, new in pairs(NGINX_KEY_ALIAS) do
+        local v = record[old]
+        if v ~= nil then
+            if record[new] == nil then record[new] = v end
+            record[old] = nil
+        end
+    end
+
+    -- Producers that cannot emit "$request" (byte-safe njs formats) send the
+    -- raw line as request_line / request instead; the generic parser needs it in message.
+    local line = record["request_line"] or record["request"]
+    if type(line) == "string" then
+        local msg = record["message"]
+        if type(msg) ~= "string" or not string.find(msg, "^[A-Z]+ %S+ HTTP/[%d%.]+$") then
+            record["message"] = line
+        end
+        record["request_line"] = nil
+        record["request"] = nil
+    end
+
+    for k in pairs(NGINX_NUMERIC) do
+        local v = record[k]
+        if v ~= nil then
+            local n = _nginx_to_number(v)
+            if n ~= nil then record[k] = n else record[k] = nil end
+        end
+    end
+    for _, k in ipairs({"remote_user", "referer", "x_forwarded_for", "upstream_addr", "realip_remote_addr"}) do
+        if record[k] == "-" or record[k] == "" then record[k] = nil end
+    end
+    return 1, ts, record
+end
+
+-- Internal / system endpoints that are polled constantly and carry no signal:
+-- log delivery, health, metrics exporters, Graylog UI polling, worker control
+-- plane. They are dropped only when healthy and fast; errors and slow calls stay.
+local NGINX_NOISE_EXACT = {
+    ["/gelf"] = true, ["/service-status"] = true, ["/ping"] = true,
+    ["/proxy-service"] = true, ["/agent/gql"] = true, ["/api/streams"] = true,
+}
+local NGINX_NOISE_PREFIX = {
+    "/api/cluster/", "/api/system/", "/api/v1/internal/", "/ws/worker/", "/sq_",
+}
+local NGINX_NOISE_SLOW_SECONDS = 1.0
+
+function drop_nginx_access_noise(tag, ts, record)
+    local uri = record["request_uri"]
+    if type(uri) ~= "string" then return 0, ts, record end
+    local path = string.match(uri, "^([^?]*)") or uri
+    local noisy = NGINX_NOISE_EXACT[path] or false
+    if not noisy then
+        for _, prefix in ipairs(NGINX_NOISE_PREFIX) do
+            if string.sub(path, 1, #prefix) == prefix then noisy = true; break end
+        end
+    end
+    if not noisy then return 0, ts, record end
+    local status = tonumber(record["status"]) or 0
+    local rt = tonumber(record["request_time"]) or 0
+    if status >= 400 or rt > NGINX_NOISE_SLOW_SECONDS then return 0, ts, record end
+    return -1, ts, record
+end
+
+-- nginx error log: keep warn and above; drop informational chatter
+-- (notice/info/debug, "buffered to a temporary file", SIGCHLD from worker reaping).
+local NGINX_ERROR_DROP_LEVEL = { notice = true, info = true, debug = true }
+
+function drop_nginx_error_noise(tag, ts, record)
+    local lvl = record["level_str"]
+    if type(lvl) == "string" and NGINX_ERROR_DROP_LEVEL[lvl] then return -1, ts, record end
+    local msg = record["message"]
+    if type(msg) == "string"
+       and string.find(msg, "is buffered to a temporary file", 1, true) then
+        return -1, ts, record
+    end
+    return 0, ts, record
+end
+
 -- Split the nginx error "tail" (", client: <ip>, server: ..., request: \"...\"")
 -- into discrete fields. Done in Lua: a single optional-group regex backtracks
 -- badly in Onigmo. message keeps only the error description.

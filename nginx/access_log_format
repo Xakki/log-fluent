@@ -1,17 +1,30 @@
+# Canonical nginx access log format for every project/host (single source of truth).
+# Include it instead of defining your own log_format, then:
+#   access_log /dev/stdout json_combined;
+# Key names match what fluent-bit/service.d/nginx.conf expects; legacy names
+# (http_user_agent, http_host, http_referrer, request_line, ...) are still renamed
+# there, so older configs keep working until they are migrated.
+# "message" is the raw request line ("GET /uri?x=1 HTTP/1.1"); fluent-bit splits it
+# into request_method / request_uri / request_proto.
+# Byte-safe variants (njs request_line/request_uri_b64) may add fields on top.
 log_format json_combined escape=json
   '{'
     '"time_local":"$time_local",'
     '"remote_addr":"$remote_addr",'
+    '"realip_remote_addr":"$realip_remote_addr",'
     '"remote_user":"$remote_user",'
-    '"http_host":"$http_host",'
+    '"request_host":"$host",'
+    '"server_name":"$server_name",'
     '"message":"$request",'
-    '"status": $status,'
+    '"status":$status,'
     '"body_bytes_sent":$body_bytes_sent,'
-    '"http_referrer":"$http_referer",'
-    '"http_user_agent":"$http_user_agent",'
-    '"request_time":"$request_time",'
     '"request_length":$request_length,'
+    '"request_time":$request_time,'
+    '"upstream_addr":"$upstream_addr",'
     '"upstream_connect_time":"$upstream_connect_time",'
     '"upstream_header_time":"$upstream_header_time",'
-    '"upstream_response_time":"$upstream_response_time"'
+    '"upstream_response_time":"$upstream_response_time",'
+    '"user_agent":"$http_user_agent",'
+    '"referer":"$http_referer",'
+    '"x_forwarded_for":"$http_x_forwarded_for"'
   '}';

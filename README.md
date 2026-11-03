@@ -149,7 +149,9 @@ stays in `docker_service`.
 | `log_format`      | Source                                  | Parsing |
 |-------------------|-----------------------------------------|---------|
 | `php`             | PHP/Monolog (JSON) + raw stderr         | direct or PHP-FPM-wrapped JSON; multiline Fatal/Stack trace/dumps; fpm noise dropped |
-| `nginx`           | access JSON + error text                | request split; error-tail fields (client/upstream/…) |
+| `nginx`           | access JSON + error text                | legacy keys renamed to canonical (`user_agent`, `referer`, `request_host`, …), `request_line` → method/uri/proto, numeric timings, healthy system endpoints (`/gelf`, health, exporters, worker control) and notice/buffering error noise dropped; error-tail fields (client/upstream/…) |
+
+Canonical nginx access format: `nginx/access_log_format` (`json_combined`) — include it instead of defining a per-project `log_format`.
 | `mariadb`         | error log (stderr)                      | multiline join; record regex |
 | `redis`           | Redis / KeyDB                           | line regex |
 | `auto` (fallback) | any unmarked service                    | global JSON + generic multiline |

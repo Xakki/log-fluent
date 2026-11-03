@@ -63,7 +63,7 @@ services:
 
     fluent-bit:
         init: true
-        image: cr.fluentbit.io/fluent/fluent-bit:latest
+        image: harbor.xakki.ru/external/fluent-bit:5
         container_name: "${COMPOSE_PROJECT_NAME}-fluent-bit"
         ports:
             - "${EXT_FLUENT_PORT:-127.0.0.1:24224}:24224/udp"
@@ -102,7 +102,8 @@ services:
 
     logrotate:
         init: true
-        image: blacklabelops/logrotate
+        # Mirror of blacklabelops/logrotate, published by `make harbor-pub`.
+        image: ${LOGROTATE_IMAGE:-harbor.xakki.ru/library/logrotate:latest}
         container_name: "${COMPOSE_PROJECT_NAME}-logrotate"
         volumes:
             - ${MYSQL_SLOWLOG_PATH:-empty_slowlog_volume}:/var/log/mysql_logs
