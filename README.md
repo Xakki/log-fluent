@@ -200,6 +200,7 @@ Set these in `.env` (see `.env_example`):
 | `JSON_LOG_PATH`          | host dir tailed at `/var/log/json`              | `/var/log/` |
 | `MYSQL_SLOWLOG_PATH`     | host dir tailed at `/var/log/mysql_logs`        | `/var/log/` |
 | `HARBOR_LOG_PATH`        | host dir tailed at `/var/log/harbor` (optional)  | `/var/log/harbor` |
+| `HOST_NGINX_LOG_PATH`    | host dir with a non-docker nginx's `*.log` (access `json_combined` + error log), tailed at `/var/log/host-nginx` (optional) | `/var/log/nginx` |
 | `EXT_FLUENT_PORT`        | forward bind (host:port)                        | `127.0.0.1:24224` |
 | `EXT_FLUENT_METRIC_PORT` | metrics/health bind                             | `127.0.0.1:2020` |
 | `GRAYLOG_HOST`           | Graylog GELF/HTTP host                          | `graylog.example.com` |

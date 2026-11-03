@@ -13,9 +13,9 @@ HARBOR_PROJECT  ?= library
 LOGROTATE_SRC   ?= blacklabelops/logrotate:latest
 LOGROTATE_DST   ?= $(HARBOR_REGISTRY)/$(HARBOR_PROJECT)/logrotate:latest
 
-.PHONY: test fluent-bit-nginx-pipeline-test fluent-bit-nginx-utf8-test fluent-bit-php-json-pipeline-test fluent-bit-config-check fluent-bit-contract-test harbor-pub
+.PHONY: test fluent-bit-host-nginx-test fluent-bit-nginx-pipeline-test fluent-bit-nginx-utf8-test fluent-bit-php-json-pipeline-test fluent-bit-config-check fluent-bit-contract-test harbor-pub
 
-test: fluent-bit-nginx-pipeline-test fluent-bit-nginx-utf8-test fluent-bit-php-json-pipeline-test fluent-bit-config-check fluent-bit-contract-test ## Run every fluent-bit check
+test: fluent-bit-host-nginx-test fluent-bit-nginx-pipeline-test fluent-bit-nginx-utf8-test fluent-bit-php-json-pipeline-test fluent-bit-config-check fluent-bit-contract-test ## Run every fluent-bit check
 
 # Invalid UTF-8 in a request is percent-encoded, valid multibyte text stays intact.
 fluent-bit-nginx-utf8-test: ## invalid UTF-8 bytes must not be dropped or mangled
@@ -27,6 +27,17 @@ fluent-bit-nginx-utf8-test: ## invalid UTF-8 bytes must not be dropped or mangle
 	printf '%s\n' "$$output" | grep -q '"user_agent":"UA %C3( bad"' || fail "invalid user-agent byte was not percent-encoded"; \
 	printf '%s\n' "$$output" | grep -qF '"user_agent":"\u0422\u0435\u0441\u0442 \ud83d\ude00"' || fail "valid multibyte text was altered"; \
 	echo "nginx utf8: OK"
+
+# Host nginx files (access JSON + error text) tailed into the same nginx path.
+fluent-bit-host-nginx-test: ## host nginx tail test
+	@output=$$(timeout 10 docker run --rm --network none $(RUN_LIMITS) $(RUN_MOUNT) \
+		"$(FLUENT_BIT_IMAGE)" -c /fluent-bit/etc/tests/host-nginx.conf 2>&1); \
+	fail() { printf '%s\n%s\n' "$$1" "$$output" >&2; exit 1; }; \
+	[ "$$(printf '%s\n' "$$output" | grep -c '"docker_service":"host-nginx"')" = 2 ] || fail "expected 2 host-nginx records"; \
+	printf '%s\n' "$$output" | grep '"request_uri":"/go"' | grep -q '"remote_addr":"1.2.3.4"' || fail "host access line was not parsed"; \
+	printf '%s\n' "$$output" | grep '"request_uri":"/x"' | grep -q '"remote_addr":"5.6.7.8"' || fail "host error context was not parsed"; \
+	if printf '%s\n' "$$output" | grep -q '"file":'; then fail "tail Path_Key leaked"; fi; \
+	echo "host nginx: OK"
 
 # End-to-end nginx normalization: legacy keys, request_line, numeric coercion, noise drop.
 fluent-bit-nginx-pipeline-test: ## nginx access/error normalization and noise filter test
@@ -57,8 +68,7 @@ fluent-bit-nginx-pipeline-test: ## nginx access/error normalization and noise fi
 		|| fail "error-log client was not renamed to remote_addr"; \
 	if printf '%s\n' "$$output" | grep -q '"client"'; then fail "error-log client duplicate remained"; fi; \
 	if printf '%s\n' "$$output" | grep '"request_uri":"/x"' | grep -q '"server_name"'; then fail "server_name equal to host was kept"; fi; \
-	printf '%s\n' "$$output" | grep '"request_uri":"/robots.txt"' | grep -q '"realip_remote_addr":"172.30.211.2"' \
-		|| fail "differing realip_remote_addr was dropped"; \
+	if printf '%s\n' "$$output" | grep -q 'realip_remote_addr'; then fail "realip_remote_addr was not dropped"; fi; \
 	echo "nginx pipeline: OK"
 
 harbor-pub: ## Mirror the logrotate image (all platforms) into Harbor library; needs docker login

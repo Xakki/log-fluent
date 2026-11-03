@@ -1,0 +1,1 @@
+{"time_local":"03/Nov/2026:07:31:09 +0000","remote_addr":"1.2.3.4","request_host":"h.example","server_name":"_","message":"GET /go HTTP/1.1","status":301,"body_bytes_sent":5,"request_length":80,"request_time":0.001,"user_agent":"UA/3","referer":"","x_forwarded_for":""}

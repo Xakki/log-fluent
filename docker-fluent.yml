@@ -81,6 +81,8 @@ services:
             - ${MYSQL_SLOWLOG_PATH:-empty_slowlog_volume}:/var/log/mysql_logs:ro
             # Harbor log files (harbor-log rsyslog). Unset -> empty volume = no-op.
             - ${HARBOR_LOG_PATH:-empty_harbor_volume}:/var/log/harbor:ro
+            # Host (non-docker) nginx *.log files. Unset -> empty volume = no-op.
+            - ${HOST_NGINX_LOG_PATH:-empty_host_nginx_volume}:/var/log/host-nginx:ro
             - fluent_bit_state:/var/lib/fluent-bit
         environment:
             - TZ=${TZ}
@@ -137,3 +139,4 @@ volumes:
     empty_log_volume:
     empty_slowlog_volume:
     empty_harbor_volume:
+    empty_host_nginx_volume:

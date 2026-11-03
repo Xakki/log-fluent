@@ -1,0 +1,1 @@
+2026/11/03 07:31:10 [error] 21#21: *9 connect() failed (111: Connection refused) while connecting to upstream, client: 5.6.7.8, server: h.example, request: "GET /x HTTP/1.1", upstream: "https://127.0.0.1:1443/x", host: "h.example"

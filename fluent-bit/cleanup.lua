@@ -69,7 +69,7 @@ end
 -- ---------------------------------------------------------------------------
 -- nginx access: one canonical record shape for every project/host.
 -- Canonical keys: message ("GET /uri HTTP/1.1" -> request_method/uri/proto),
--- request_host, server_name, remote_addr, realip_remote_addr, status (num),
+-- request_host, server_name, remote_addr, status (num),
 -- request_time/upstream_*_time (num), request_length, body_bytes_sent,
 -- user_agent, referer, x_forwarded_for. Legacy project formats are renamed here
 -- so that old and new nginx configs land in Graylog identically.
@@ -125,7 +125,7 @@ function normalize_nginx_access(tag, ts, record)
             if n ~= nil then record[k] = n else record[k] = nil end
         end
     end
-    for _, k in ipairs({"remote_user", "referer", "x_forwarded_for", "upstream_addr", "realip_remote_addr"}) do
+    for _, k in ipairs({"remote_user", "referer", "x_forwarded_for", "upstream_addr"}) do
         if record[k] == "-" or record[k] == "" then record[k] = nil end
     end
     return 1, ts, record
@@ -134,7 +134,8 @@ end
 -- Drop fields that repeat another field of the same record.
 function dedupe_nginx_fields(tag, ts, record)
     local changed = false
-    if record["realip_remote_addr"] ~= nil and record["realip_remote_addr"] == record["remote_addr"] then
+    -- remote_addr is the only client address we keep; the proxy hop is noise.
+    if record["realip_remote_addr"] ~= nil then
         record["realip_remote_addr"] = nil; changed = true
     end
     if record["server_name"] ~= nil and record["server_name"] == record["request_host"] then
