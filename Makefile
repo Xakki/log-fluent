@@ -23,7 +23,7 @@ fluent-bit-nginx-utf8-test: ## invalid UTF-8 bytes must not be dropped or mangle
 		"$(FLUENT_BIT_IMAGE)" -c /fluent-bit/etc/tests/nginx-utf8.conf 2>&1); \
 	fail() { printf '%s\n%s\n' "$$1" "$$output" >&2; exit 1; }; \
 	[ "$$(printf '%s\n' "$$output" | grep -c '"short_message"')" = 3 ] || fail "expected 3 records"; \
-	printf '%s\n' "$$output" | grep -q '"short_message":"/a?q=%FF%FE%D0"' || fail "invalid request bytes were not percent-encoded"; \
+	printf '%s\n' "$$output" | grep -q '"request_uri":"/a?q=%FF%FE%D0"' || fail "invalid request bytes were not percent-encoded"; \
 	printf '%s\n' "$$output" | grep -q '"user_agent":"UA %C3( bad"' || fail "invalid user-agent byte was not percent-encoded"; \
 	printf '%s\n' "$$output" | grep -qF '"user_agent":"\u0422\u0435\u0441\u0442 \ud83d\ude00"' || fail "valid multibyte text was altered"; \
 	echo "nginx utf8: OK"
@@ -33,8 +33,16 @@ fluent-bit-harbor-test: ## harbor level derivation and warning-and-above filter 
 	@output=$$(timeout 10 docker run --rm --network none $(RUN_LIMITS) $(RUN_MOUNT) \
 		"$(FLUENT_BIT_IMAGE)" -c /fluent-bit/etc/tests/harbor.conf 2>&1); \
 	fail() { printf '%s\n%s\n' "$$1" "$$output" >&2; exit 1; }; \
-	[ "$$(printf '%s\n' "$$output" | grep -c '"docker_project":"harbor"')" = 4 ] || fail "expected 4 surviving harbor records"; \
+	[ "$$(printf '%s\n' "$$output" | grep -c '"docker_project":"harbor"')" = 5 ] || fail "expected 5 surviving harbor records"; \
 	printf '%s\n' "$$output" | grep '"docker_service":"core"' | grep -q '"level_name":"ERROR"' || fail "go [ERROR] was not kept"; \
+	auth=$$(printf '%s\n' "$$output" | grep 'failed to authenticate user'); \
+	printf '%s\n' "$$auth" | grep -q '"file":"/server/middleware/security/basic_auth.go:72"' || fail "harbor file:line was not parsed"; \
+	printf '%s\n' "$$auth" | grep -q '"client_ip":"fd00:c6::1, 10.210.0.43"' || fail "harbor client_ip was not parsed"; \
+	printf '%s\n' "$$auth" | grep -q '"request_id":"977e0d44-b9f3-4f22-9175-e8a459c34434"' || fail "harbor request_id was not parsed"; \
+	printf '%s\n' "$$auth" | grep -q '"user_agent":"curl/8.14.1"' || fail "harbor user_agent was not parsed"; \
+	printf '%s\n' "$$auth" | grep -q "\"message\":\"failed to authenticate user:log-test-nonexistent, error:Failed to authenticate user, due to error 'Invalid credentials'\"" || fail "harbor message was not stripped to the text"; \
+	printf '%s\n' "$$auth" | grep -q '"datetime":"2026-11-04T14:26:19Z"' || fail "harbor event time was not parsed"; \
+	printf '%s\n' "$$output" | grep '"message":"response completed with error"' | grep -q '"level_name":"ERROR"' || fail "registry msg was not extracted"; \
 	printf '%s\n' "$$output" | grep -q '"level_name":"WARNING"' || fail "go [WARNING] was not kept"; \
 	printf '%s\n' "$$output" | grep '"docker_service":"registry"' | grep -q '"level_name":"ERROR"' || fail "registry level=error was not kept"; \
 	printf '%s\n' "$$output" | grep '"docker_service":"proxy"' | grep -q '"level_name":"ERROR"' || fail "5xx access line was not kept as ERROR"; \
@@ -47,10 +55,9 @@ fluent-bit-host-nginx-test: ## host nginx tail test
 		"$(FLUENT_BIT_IMAGE)" -c /fluent-bit/etc/tests/host-nginx.conf 2>&1); \
 	fail() { printf '%s\n%s\n' "$$1" "$$output" >&2; exit 1; }; \
 	[ "$$(printf '%s\n' "$$output" | grep -c '"docker_service":"host-nginx"')" = 2 ] || fail "expected 2 host-nginx records"; \
-	printf '%s\n' "$$output" | grep '"short_message":"/go"' | grep -q '"remote_addr":"1.2.3.4"' || fail "host access line was not parsed"; \
+	printf '%s\n' "$$output" | grep '"request_uri":"/go"' | grep -q '"remote_addr":"1.2.3.4"' || fail "host access line was not parsed"; \
 	printf '%s\n' "$$output" | grep '"request_uri":"/x"' | grep -q '"remote_addr":"5.6.7.8"' || fail "host error context was not parsed"; \
-	printf '%s\n' "$$output" | grep '"short_message":"/go"' | grep -q '"log_source":"stdout"' || fail "host access must look like stdout"; \
-	if printf '%s\n' "$$output" | grep '"short_message":"/go"' | grep -q '"request_uri"'; then fail "request_uri duplicates message on access records"; fi; \
+	printf '%s\n' "$$output" | grep '"request_uri":"/go"' | grep -q '"log_source":"stdout"' || fail "host access must look like stdout"; \
 	printf '%s\n' "$$output" | grep '"request_uri":"/x"' | grep -q '"log_source":"stderr"' || fail "host error must look like stderr"; \
 	if printf '%s\n' "$$output" | grep -q '"file":'; then fail "tail Path_Key leaked"; fi; \
 	echo "host nginx: OK"
@@ -62,18 +69,18 @@ fluent-bit-nginx-pipeline-test: ## nginx access/error normalization and noise fi
 	fail() { printf '%s\n%s\n' "$$1" "$$output" >&2; exit 1; }; \
 	[ "$$(printf '%s\n' "$$output" | grep -c '"short_message"')" = 5 ] \
 		|| fail "expected 5 surviving records (3 access + 1 failing system call + 1 error)"; \
-	printf '%s\n' "$$output" | grep '"short_message":"/orders"' | grep -q '"user_agent":"UA/1"' \
+	printf '%s\n' "$$output" | grep '"request_uri":"/orders"' | grep -q '"user_agent":"UA/1"' \
 		|| fail "legacy http_user_agent was not renamed"; \
-	printf '%s\n' "$$output" | grep '"short_message":"/orders"' | grep -q '"request_host":"a.example"' \
+	printf '%s\n' "$$output" | grep '"request_uri":"/orders"' | grep -q '"request_host":"a.example"' \
 		|| fail "legacy http_host was not renamed to request_host"; \
-	printf '%s\n' "$$output" | grep '"short_message":"/orders"' | grep -q '"request_time":0.123' \
+	printf '%s\n' "$$output" | grep '"request_uri":"/orders"' | grep -q '"request_time":0.123' \
 		|| fail "request_time was not coerced to a number"; \
-	printf '%s\n' "$$output" | grep '"short_message":"/orders"' | grep -q '"upstream_response_time":0.02' \
+	printf '%s\n' "$$output" | grep '"request_uri":"/orders"' | grep -q '"upstream_response_time":0.02' \
 		|| fail "multi-value upstream time was not reduced to the last value"; \
-	printf '%s\n' "$$output" | grep '"short_message":"/api/v1/convert?x=1"' | grep -q '"request_method":"POST"' \
+	printf '%s\n' "$$output" | grep '"request_uri":"/api/v1/convert?x=1"' | grep -q '"request_method":"POST"' \
 		|| fail "request_line was not split into request_method"; \
 	if printf '%s\n' "$$output" | grep -q 'command-pending'; then fail "healthy system endpoint was not dropped"; fi; \
-	printf '%s\n' "$$output" | grep '"short_message":"/gelf"' | grep -q '"status":502' \
+	printf '%s\n' "$$output" | grep '"request_uri":"/gelf"' | grep -q '"status":502' \
 		|| fail "failing system endpoint was dropped"; \
 	if printf '%s\n' "$$output" | grep -q 'SIGCHLD'; then fail "notice-level error was not dropped"; fi; \
 	if printf '%s\n' "$$output" | grep -q 'buffered to a temporary file'; then fail "buffering noise was not dropped"; fi; \

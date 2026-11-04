@@ -560,18 +560,18 @@ end
 local function _coalesce_short_message(record)
     local sm = record["short_message"]
     if sm ~= nil and sm ~= "" then return false end
-    for _, src in ipairs({"message", "msg", "log", "request_uri"}) do
+    for _, src in ipairs({"message", "msg", "log"}) do
         local v = record[src]
         if v ~= nil and v ~= "" then
             record["short_message"] = v
-            -- The parser filter removes its source `message` key by default.
-            -- For nginx access records that makes `request_uri` the fallback
-            -- short_message source, so keeping it would store the same path
-            -- twice (message and request_uri): drop the duplicate source.
+            -- Message-like sources are moved into short_message (no duplicate payload key).
             record[src] = nil
             return true
         end
     end
+    -- nginx access records carry no message text (the parser consumed the request line
+    -- into request_method/request_uri/request_proto): GELF still needs a non-empty
+    -- short_message, so a "-" placeholder is sent and request_uri stays a field.
     record["short_message"] = "-"
     return true
 end
@@ -621,11 +621,13 @@ function normalize_event_time(tag, ts, record)
     return 0, ts, record
 end
 
--- Host (non-docker) nginx: derive the docker-like log_source from the record kind.
--- Harbor components log in different native shapes (Go logrus "[ERROR]", registry
--- "level=error", postgres "ERROR:", apache-style access lines). Derive the level
--- from the message so the harbor tail can keep only warning and above; unknown
--- shapes stay INFO (dropped by the harbor level filter).
+-- Harbor components log in different native shapes. Parse them into fields and derive
+-- the level so the harbor tail can keep only warning and above (unknown shapes stay INFO).
+--   Go logrus (core, jobservice, registryctl):
+--     2026-11-04T14:26:19Z [ERROR] [/path/file.go:72][client IP="1.2.3.4" requestID="x" user agent="curl"]: text
+--     2026-11-04T14:21:16Z [ERROR] [/path/file.go:234]: text
+--   registry (distribution logfmt): time="..." level=error msg="text" key=value ...
+--   postgres "ERROR:  text", apache-style access lines (5xx kept as ERROR).
 local HARBOR_BRACKET = {
     DEBUG = "DEBUG", INFO = "INFO", NOTICE = "NOTICE", WARNING = "WARNING", WARN = "WARNING",
     ERROR = "ERROR", FATAL = "CRITICAL", PANIC = "CRITICAL",
@@ -634,17 +636,61 @@ local HARBOR_LOGFMT = {
     debug = "DEBUG", info = "INFO", warn = "WARNING", warning = "WARNING",
     error = "ERROR", fatal = "CRITICAL", panic = "CRITICAL",
 }
+local HARBOR_KEY = { requestid = "request_id" }
+
+local function _harbor_key(k)
+    local key = string.lower(k):gsub("[^%w]+", "_"):gsub("^_+", ""):gsub("_+$", "")
+    return HARBOR_KEY[key] or key
+end
+
+-- key="quoted value" / key=bare pairs of a logrus context block or logfmt tail.
+local function _harbor_pairs(s, record, skip, spaced)
+    local pat = spaced and '([%a][%w%._ ]-)="([^"]*)"' or '([%a][%w%._]*)="([^"]*)"'
+    for k, qv in string.gmatch(s, pat) do
+        local key = _harbor_key(k)
+        if key ~= "" and not skip[key] and record[key] == nil then record[key] = qv end
+    end
+end
 
 function harbor_level(tag, ts, record)
     local msg = record["message"]
     if type(msg) ~= "string" then return 0, ts, record end
     local name = nil
-    local b = string.match(msg, "%[(%u+)%]")
-    if b then name = HARBOR_BRACKET[b] end
+
+    -- Go logrus: "<ISO8601>Z [LEVEL] [file:line][context]: text"
+    local t, lvl, rest = string.match(msg, "^(%d%d%d%d%-%d%d%-%d%dT[%d:%.]+Z)%s+%[(%u+)%]%s+(.*)$")
+    if t and HARBOR_BRACKET[lvl] then
+        name = HARBOR_BRACKET[lvl]
+        record["datetime"] = t
+        local file, tail = string.match(rest, "^%[([^%]]+)%](.*)$")
+        if file then
+            record["file"] = file
+            local ctx, text = string.match(tail, "^%[(.-)%]:%s*(.*)$")
+            if ctx then
+                _harbor_pairs(ctx, record, {}, true)
+                record["message"] = text
+            else
+                local text2 = string.match(tail, "^:%s*(.*)$")
+                if text2 then record["message"] = text2 end
+            end
+        end
+    end
+
+    -- registry logfmt: time="..." level=error msg="..." key=val
     if not name then
         local l = string.match(msg, "level=(%a+)")
-        if l then name = HARBOR_LOGFMT[string.lower(l)] end
+        if l and HARBOR_LOGFMT[string.lower(l)] and string.find(msg, "^time=") then
+            name = HARBOR_LOGFMT[string.lower(l)]
+            local at = string.match(msg, '^time="([^"]+)"')
+            if at then record["datetime"] = at end
+            local text = string.match(msg, 'msg="(.-)"%s+[%w%._]+=') or string.match(msg, 'msg="(.-)"%s*$')
+            if text then record["message"] = text end
+            _harbor_pairs(msg, record, { time = true, level = true, msg = true })
+        elseif l and HARBOR_LOGFMT[string.lower(l)] then
+            name = HARBOR_LOGFMT[string.lower(l)]
+        end
     end
+
     if not name then
         local p = string.match(msg, "^%s*(%u+):%s")
         if p then name = HARBOR_BRACKET[p] end
@@ -657,6 +703,8 @@ function harbor_level(tag, ts, record)
     return 1, ts, record
 end
 
+
+-- Host (non-docker) nginx: derive the docker-like log_source from the record kind.
 function host_nginx_stream(tag, ts, record)
     if record["docker_service"] ~= "host-nginx" then return 0, ts, record end
     if record["status"] ~= nil then record["log_source"] = "stdout" else record["log_source"] = "stderr" end
