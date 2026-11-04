@@ -13,9 +13,9 @@ HARBOR_PROJECT  ?= library
 LOGROTATE_SRC   ?= blacklabelops/logrotate:latest
 LOGROTATE_DST   ?= $(HARBOR_REGISTRY)/$(HARBOR_PROJECT)/logrotate:latest
 
-.PHONY: test fluent-bit-harbor-test fluent-bit-host-nginx-testfluent-bit-nginx-pipeline-test fluent-bit-nginx-utf8-test fluent-bit-php-json-pipeline-test fluent-bit-config-check fluent-bit-contract-test harbor-pub
+.PHONY: test fluent-bit-harbor-test fluent-bit-host-nginx-test fluent-bit-nginx-pipeline-test fluent-bit-nginx-utf8-test fluent-bit-php-json-pipeline-test fluent-bit-config-check fluent-bit-contract-test harbor-pub
 
-test: fluent-bit-harbor-test fluent-bit-host-nginx-testfluent-bit-nginx-pipeline-test fluent-bit-nginx-utf8-test fluent-bit-php-json-pipeline-test fluent-bit-config-check fluent-bit-contract-test ## Run every fluent-bit check
+test: fluent-bit-harbor-test fluent-bit-host-nginx-test fluent-bit-nginx-pipeline-test fluent-bit-nginx-utf8-test fluent-bit-php-json-pipeline-test fluent-bit-config-check fluent-bit-contract-test ## Run every fluent-bit check
 
 # Invalid UTF-8 in a request is percent-encoded, valid multibyte text stays intact.
 fluent-bit-nginx-utf8-test: ## invalid UTF-8 bytes must not be dropped or mangled
@@ -33,7 +33,7 @@ fluent-bit-harbor-test: ## harbor level derivation and warning-and-above filter 
 	@output=$$(timeout 10 docker run --rm --network none $(RUN_LIMITS) $(RUN_MOUNT) \
 		"$(FLUENT_BIT_IMAGE)" -c /fluent-bit/etc/tests/harbor.conf 2>&1); \
 	fail() { printf '%s\n%s\n' "$$1" "$$output" >&2; exit 1; }; \
-	[ "$$(printf '%s\n' "$$output" | grep -c '"docker_project":"harbor"')" = 5 ] || fail "expected 5 surviving harbor records"; \
+	[ "$$(printf '%s\n' "$$output" | grep -c '"docker_project":"harbor"')" = 6 ] || fail "expected 6 surviving harbor records"; \
 	printf '%s\n' "$$output" | grep '"docker_service":"core"' | grep -q '"level_name":"ERROR"' || fail "go [ERROR] was not kept"; \
 	auth=$$(printf '%s\n' "$$output" | grep 'failed to authenticate user'); \
 	printf '%s\n' "$$auth" | grep -q '"file":"/server/middleware/security/basic_auth.go:72"' || fail "harbor file:line was not parsed"; \
@@ -46,6 +46,8 @@ fluent-bit-harbor-test: ## harbor level derivation and warning-and-above filter 
 	printf '%s\n' "$$output" | grep -q '"level_name":"WARNING"' || fail "go [WARNING] was not kept"; \
 	printf '%s\n' "$$output" | grep '"docker_service":"registry"' | grep -q '"level_name":"ERROR"' || fail "registry level=error was not kept"; \
 	printf '%s\n' "$$output" | grep '"docker_service":"proxy"' | grep -q '"level_name":"ERROR"' || fail "5xx access line was not kept as ERROR"; \
+	beego=$$(printf '%s\n' "$$output" | grep 'router.go:1078'); \
+	printf '%s\n' "$$beego" | grep '"level_name":"ERROR"' | grep '"datetime":"2026-11-04T16:30:05.871Z"' | grep -q '"message":"Error parsing request body:multipart: NextPart: bufio: buffer full"' || fail "beego line was not parsed"; \
 	if printf '%s\n' "$$output" | grep -q 'payload ok\|authorized request\|GET / HTTP'; then fail "info noise was not dropped"; fi; \
 	echo "harbor: OK"
 

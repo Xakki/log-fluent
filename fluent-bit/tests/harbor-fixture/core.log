@@ -6,3 +6,4 @@ Nov  4 16:49:30 10.200.13.1 registry[1]: time="2026-11-04T13:49:30Z" level=info 
 Nov  4 16:50:00 10.200.13.1 portal[1]: 10.200.13.8 - - [04/Nov/2026:13:50:00 +0000] "GET / HTTP/1.1" 200 785 "-" "Go-http-client/1.1"
 Nov  4 16:51:00 10.200.13.1 proxy[1]: 10.200.13.8 - - [04/Nov/2026:13:51:00 +0000] "GET /v2/ HTTP/1.1" 502 150 "-" "docker/27"
 Nov  4 17:26:19 10.200.13.1 core[2013932]: 2026-11-04T14:26:19Z [ERROR] [/server/middleware/security/basic_auth.go:72][client IP="fd00:c6::1, 10.210.0.43" requestID="977e0d44-b9f3-4f22-9175-e8a459c34434" user agent="curl/8.14.1"]: failed to authenticate user:log-test-nonexistent, error:Failed to authenticate user, due to error 'Invalid credentials'
+Nov  4 19:30:05 10.200.13.1 core[2013932]: 2026/11/04 16:30:05.871 #033[1;31m[E]#033[0m [router.go:1078]  Error parsing request body:multipart: NextPart: bufio: buffer full

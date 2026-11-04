@@ -636,6 +636,7 @@ local HARBOR_LOGFMT = {
     debug = "DEBUG", info = "INFO", warn = "WARNING", warning = "WARNING",
     error = "ERROR", fatal = "CRITICAL", panic = "CRITICAL",
 }
+local HARBOR_BEEGO = { E = "ERROR", W = "WARNING", I = "INFO", D = "DEBUG", T = "DEBUG", N = "NOTICE", C = "CRITICAL", A = "ALERT" }
 local HARBOR_KEY = { requestid = "request_id" }
 
 local function _harbor_key(k)
@@ -673,6 +674,20 @@ function harbor_level(tag, ts, record)
                 local text2 = string.match(tail, "^:%s*(.*)$")
                 if text2 then record["message"] = text2 end
             end
+        end
+    end
+
+    -- beego (core router): "2026/11/04 16:30:05.871 <ansi>[E]<ansi> [router.go:1078]  text"
+    -- rsyslog escapes ESC as "#033", so strip both spellings of the colour codes first.
+    if not name then
+        local plain = string.gsub(string.gsub(msg, "#033%[[%d;]*m", ""), "\27%[[%d;]*m", "")
+        local y, mo, d, hms, l, file, text = string.match(plain,
+            "^(%d%d%d%d)/(%d%d)/(%d%d)%s+([%d:%.]+)%s+%[(%u)%]%s+%[([^%]]+)%]%s*(.*)$")
+        if y and HARBOR_BEEGO[l] then
+            name = HARBOR_BEEGO[l]
+            record["datetime"] = y .. "-" .. mo .. "-" .. d .. "T" .. hms .. "Z"
+            record["file"] = file
+            record["message"] = text
         end
     end
 
