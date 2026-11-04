@@ -1,0 +1,7 @@
+Nov  4 16:46:16 10.200.13.1 core[1]: 2026-11-04T13:46:16Z [ERROR] [/controller/registry/controller.go:234]: failed to check health of registry 1
+Nov  4 16:47:00 10.200.13.1 core[1]: 2026-11-04T13:47:00Z [INFO] [/server/middleware/log/log.go:30]: payload ok
+Nov  4 16:48:00 10.200.13.1 core[1]: 2026-11-04T13:48:00Z [WARNING] [/core/main.go:10]: slow scan queue
+Nov  4 16:49:00 10.200.13.1 registry[1]: time="2026-11-04T13:49:00Z" level=error msg="response completed with error" err.code=unknown
+Nov  4 16:49:30 10.200.13.1 registry[1]: time="2026-11-04T13:49:30Z" level=info msg="authorized request"
+Nov  4 16:50:00 10.200.13.1 portal[1]: 10.200.13.8 - - [04/Nov/2026:13:50:00 +0000] "GET / HTTP/1.1" 200 785 "-" "Go-http-client/1.1"
+Nov  4 16:51:00 10.200.13.1 proxy[1]: 10.200.13.8 - - [04/Nov/2026:13:51:00 +0000] "GET /v2/ HTTP/1.1" 502 150 "-" "docker/27"

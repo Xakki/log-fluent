@@ -13,9 +13,9 @@ HARBOR_PROJECT  ?= library
 LOGROTATE_SRC   ?= blacklabelops/logrotate:latest
 LOGROTATE_DST   ?= $(HARBOR_REGISTRY)/$(HARBOR_PROJECT)/logrotate:latest
 
-.PHONY: test fluent-bit-host-nginx-test fluent-bit-nginx-pipeline-test fluent-bit-nginx-utf8-test fluent-bit-php-json-pipeline-test fluent-bit-config-check fluent-bit-contract-test harbor-pub
+.PHONY: test fluent-bit-harbor-test fluent-bit-host-nginx-testfluent-bit-nginx-pipeline-test fluent-bit-nginx-utf8-test fluent-bit-php-json-pipeline-test fluent-bit-config-check fluent-bit-contract-test harbor-pub
 
-test: fluent-bit-host-nginx-test fluent-bit-nginx-pipeline-test fluent-bit-nginx-utf8-test fluent-bit-php-json-pipeline-test fluent-bit-config-check fluent-bit-contract-test ## Run every fluent-bit check
+test: fluent-bit-harbor-test fluent-bit-host-nginx-testfluent-bit-nginx-pipeline-test fluent-bit-nginx-utf8-test fluent-bit-php-json-pipeline-test fluent-bit-config-check fluent-bit-contract-test ## Run every fluent-bit check
 
 # Invalid UTF-8 in a request is percent-encoded, valid multibyte text stays intact.
 fluent-bit-nginx-utf8-test: ## invalid UTF-8 bytes must not be dropped or mangled
@@ -27,6 +27,19 @@ fluent-bit-nginx-utf8-test: ## invalid UTF-8 bytes must not be dropped or mangle
 	printf '%s\n' "$$output" | grep -q '"user_agent":"UA %C3( bad"' || fail "invalid user-agent byte was not percent-encoded"; \
 	printf '%s\n' "$$output" | grep -qF '"user_agent":"\u0422\u0435\u0441\u0442 \ud83d\ude00"' || fail "valid multibyte text was altered"; \
 	echo "nginx utf8: OK"
+
+# Harbor tail: only warning and above survives, level derived from each component's native shape.
+fluent-bit-harbor-test: ## harbor level derivation and warning-and-above filter test
+	@output=$$(timeout 10 docker run --rm --network none $(RUN_LIMITS) $(RUN_MOUNT) \
+		"$(FLUENT_BIT_IMAGE)" -c /fluent-bit/etc/tests/harbor.conf 2>&1); \
+	fail() { printf '%s\n%s\n' "$$1" "$$output" >&2; exit 1; }; \
+	[ "$$(printf '%s\n' "$$output" | grep -c '"docker_project":"harbor"')" = 4 ] || fail "expected 4 surviving harbor records"; \
+	printf '%s\n' "$$output" | grep '"docker_service":"core"' | grep -q '"level_name":"ERROR"' || fail "go [ERROR] was not kept"; \
+	printf '%s\n' "$$output" | grep -q '"level_name":"WARNING"' || fail "go [WARNING] was not kept"; \
+	printf '%s\n' "$$output" | grep '"docker_service":"registry"' | grep -q '"level_name":"ERROR"' || fail "registry level=error was not kept"; \
+	printf '%s\n' "$$output" | grep '"docker_service":"proxy"' | grep -q '"level_name":"ERROR"' || fail "5xx access line was not kept as ERROR"; \
+	if printf '%s\n' "$$output" | grep -q 'payload ok\|authorized request\|GET / HTTP'; then fail "info noise was not dropped"; fi; \
+	echo "harbor: OK"
 
 # Host nginx files (access JSON + error text) tailed into the same nginx path.
 fluent-bit-host-nginx-test: ## host nginx tail test

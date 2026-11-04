@@ -622,6 +622,41 @@ function normalize_event_time(tag, ts, record)
 end
 
 -- Host (non-docker) nginx: derive the docker-like log_source from the record kind.
+-- Harbor components log in different native shapes (Go logrus "[ERROR]", registry
+-- "level=error", postgres "ERROR:", apache-style access lines). Derive the level
+-- from the message so the harbor tail can keep only warning and above; unknown
+-- shapes stay INFO (dropped by the harbor level filter).
+local HARBOR_BRACKET = {
+    DEBUG = "DEBUG", INFO = "INFO", NOTICE = "NOTICE", WARNING = "WARNING", WARN = "WARNING",
+    ERROR = "ERROR", FATAL = "CRITICAL", PANIC = "CRITICAL",
+}
+local HARBOR_LOGFMT = {
+    debug = "DEBUG", info = "INFO", warn = "WARNING", warning = "WARNING",
+    error = "ERROR", fatal = "CRITICAL", panic = "CRITICAL",
+}
+
+function harbor_level(tag, ts, record)
+    local msg = record["message"]
+    if type(msg) ~= "string" then return 0, ts, record end
+    local name = nil
+    local b = string.match(msg, "%[(%u+)%]")
+    if b then name = HARBOR_BRACKET[b] end
+    if not name then
+        local l = string.match(msg, "level=(%a+)")
+        if l then name = HARBOR_LOGFMT[string.lower(l)] end
+    end
+    if not name then
+        local p = string.match(msg, "^%s*(%u+):%s")
+        if p then name = HARBOR_BRACKET[p] end
+    end
+    if not name then
+        local st = string.match(msg, '" (%d%d%d) ')
+        if st and tonumber(st) >= 500 then name = "ERROR" end
+    end
+    record["level_name"] = name or "INFO"
+    return 1, ts, record
+end
+
 function host_nginx_stream(tag, ts, record)
     if record["docker_service"] ~= "host-nginx" then return 0, ts, record end
     if record["status"] ~= nil then record["log_source"] = "stdout" else record["log_source"] = "stderr" end
