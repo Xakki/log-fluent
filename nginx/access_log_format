@@ -5,7 +5,8 @@
 # (http_user_agent, http_host, http_referrer, request_line, ...) are still renamed
 # there, so older configs keep working until they are migrated.
 # "message" is the raw request line ("GET /uri?x=1 HTTP/1.1"); fluent-bit splits it
-# into request_method / request_uri / request_proto.
+# into request_method / request_proto; the path stays in message only (request_uri is
+# dropped as its duplicate).
 # Byte-safe variants (njs request_line/request_uri_b64) may add fields on top.
 log_format json_combined escape=json
   '{'

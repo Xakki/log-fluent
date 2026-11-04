@@ -566,10 +566,9 @@ local function _coalesce_short_message(record)
             record["short_message"] = v
             -- The parser filter removes its source `message` key by default.
             -- For nginx access records that makes `request_uri` the fallback
-            -- short_message source. Preserve it: it is a structured parsed
-            -- field needed for Graylog search and aggregation, not a duplicate
-            -- payload field like message/msg/log.
-            if src ~= "request_uri" then record[src] = nil end
+            -- short_message source, so keeping it would store the same path
+            -- twice (message and request_uri): drop the duplicate source.
+            record[src] = nil
             return true
         end
     end
