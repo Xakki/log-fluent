@@ -37,15 +37,17 @@ include:
 
 Companion PHP loggers that emit the structured logs this config expects:
 
-- Laravel / Monolog — [Xakki/LaraLog](https://github.com/Xakki/LaraLog)
-- Plain PHP (PSR only) — [Xakki/PHPErrorCatcher](https://github.com/Xakki/PHPErrorCatcher)
+- Laravel / Monolog — [Xakki/log-laravel](https://github.com/Xakki/log-laravel) (`xakki/log-laravel`)
+- Symfony / PSR-3 — [Xakki/log-symfony](https://github.com/Xakki/log-symfony) (`xakki/log-symfony`)
+- Plain PHP (PSR only) — [Xakki/log-php](https://github.com/Xakki/log-php) (`xakki/log-php`)
+- Python — [Xakki/log-python](https://github.com/Xakki/log-python) (`xakki-log-python` on PyPI)
 
 ### B) git submodule (any stack — Python, Go, Node, …)
 
 For projects without Composer. Pin a release tag:
 
 ```sh
-git submodule add https://github.com/Xakki/FluentLog.git infra/log-fluent
+git submodule add https://github.com/Xakki/log-fluent.git infra/log-fluent
 git -C infra/log-fluent checkout v0.1.3
 ```
 
@@ -152,6 +154,8 @@ stays in `docker_service`.
 | `nginx`           | access JSON + error text                | legacy keys renamed to canonical (`user_agent`, `referer`, `request_host`, …), `request_line` → method/uri/proto, numeric timings, healthy system endpoints (`/gelf`, health, exporters, worker control) and notice/buffering error noise dropped; error-tail fields (client/upstream/…) |
 
 Canonical nginx access format: `nginx/access_log_format` (`json_combined`) — include it instead of defining a per-project `log_format`.
+
+Canonical nginx TLS profile: `nginx/tls_params.conf` (TLS 1.2+1.3, AEAD+ECDHE ciphers, tickets off) and `nginx/tls_http3.conf` (`Alt-Svc` for QUIC edges). Copy `tls_params.conf` to the host as `/etc/nginx/tls_params.conf` and `include` it at `http{}` instead of repeating `ssl_*` directives; a host that must differ overrides one directive after the include, with a comment.
 | `mariadb`         | error log (stderr)                      | multiline join; record regex |
 | `redis`           | Redis / KeyDB                           | line regex |
 | `auto` (fallback) | any unmarked service                    | global JSON + generic multiline |
@@ -263,3 +267,12 @@ survives a container recreate; without it logrotate re-learns every file and ski
 | `24224`| fluentd `forward` input (TCP/UDP) |
 | `2020` | HTTP server — health / metrics |
 | `2021` | Prometheus exporter (internal; proxied by nginx) |
+
+# Related projects
+
+Sibling logging libraries sharing one field contract ([Logging Rules](https://github.com/Xakki/log-laravel/blob/main/docs/LoggingRules.md)):
+
+* [log-laravel](https://github.com/Xakki/log-laravel) — `xakki/log-laravel`. Laravel / Monolog: custom `LogManager`, processors, redaction, SQL and queue logging.
+* [log-symfony](https://github.com/Xakki/log-symfony) — `xakki/log-symfony`. PSR-3 / Symfony / Monolog 3: context enrichment, type coercion, redaction.
+* [log-php](https://github.com/Xakki/log-php) — `xakki/log-php`. Plain PHP (no framework, PSR-3; PHP 5.6+ on branch `master56`): error/exception catcher with pluggable storages.
+* [log-python](https://github.com/Xakki/log-python) — `xakki-log-python` (PyPI). Python: structured JSON logging with the same field/type contract.
