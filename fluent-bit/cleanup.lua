@@ -71,7 +71,7 @@ end
 -- Canonical keys: message ("GET /uri HTTP/1.1" -> request_method/uri/proto),
 -- request_host, server_name, remote_addr, status (num),
 -- request_time/upstream_*_time (num), request_length, body_bytes_sent,
--- user_agent, referer, x_forwarded_for. Legacy project formats are renamed here
+-- user_agent, referer (x_forwarded_for is dropped: it repeats remote_addr). Legacy project formats are renamed here
 -- so that old and new nginx configs land in Graylog identically.
 -- ---------------------------------------------------------------------------
 local NGINX_KEY_ALIAS = {
@@ -84,7 +84,7 @@ local NGINX_KEY_ALIAS = {
 }
 local NGINX_NUMERIC = {
     status = true, body_bytes_sent = true, request_length = true,
-    request_time = true, upstream_connect_time = true,
+    request_time = true, upstream_connect_time = true, remote_port = true,
     upstream_header_time = true, upstream_response_time = true,
 }
 
@@ -138,6 +138,8 @@ function dedupe_nginx_fields(tag, ts, record)
     if record["realip_remote_addr"] ~= nil then
         record["realip_remote_addr"] = nil; changed = true
     end
+    -- x_forwarded_for only repeats the client address that realip already put in remote_addr.
+    if record["x_forwarded_for"] ~= nil then record["x_forwarded_for"] = nil; changed = true end
     if record["server_name"] ~= nil and record["server_name"] == record["request_host"] then
         record["server_name"] = nil; changed = true
     end

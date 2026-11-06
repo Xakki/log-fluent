@@ -94,6 +94,8 @@ fluent-bit-nginx-pipeline-test: ## nginx access/error normalization and noise fi
 	if printf '%s\n' "$$output" | grep -q '"client"'; then fail "error-log client duplicate remained"; fi; \
 	if printf '%s\n' "$$output" | grep '"request_uri":"/x"' | grep -q '"server_name"'; then fail "server_name equal to host was kept"; fi; \
 	if printf '%s\n' "$$output" | grep -q 'realip_remote_addr'; then fail "realip_remote_addr was not dropped"; fi; \
+	printf '%s\n' "$$output" | grep -q '"remote_port":51234' || fail "remote_port was not kept as a number"; \
+	if printf '%s\n' "$$output" | grep -q 'x_forwarded_for'; then fail "x_forwarded_for was not dropped"; fi; \
 	echo "nginx pipeline: OK"
 
 harbor-pub: ## Mirror the logrotate image (all platforms) into Harbor library; needs docker login
