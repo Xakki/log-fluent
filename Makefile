@@ -13,9 +13,20 @@ HARBOR_PROJECT  ?= library
 LOGROTATE_SRC   ?= blacklabelops/logrotate:latest
 LOGROTATE_DST   ?= $(HARBOR_REGISTRY)/$(HARBOR_PROJECT)/logrotate:latest
 
-.PHONY: test fluent-bit-harbor-test fluent-bit-host-nginx-test fluent-bit-nginx-pipeline-test fluent-bit-nginx-utf8-test fluent-bit-php-json-pipeline-test fluent-bit-config-check fluent-bit-contract-test harbor-pub
+.PHONY: test fluent-bit-harbor-test fluent-bit-host-nginx-test fluent-bit-nginx-pipeline-test fluent-bit-nginx-utf8-test fluent-bit-php-json-pipeline-test fluent-bit-event-time-test fluent-bit-config-check fluent-bit-contract-test harbor-pub
 
-test: fluent-bit-harbor-test fluent-bit-host-nginx-test fluent-bit-nginx-pipeline-test fluent-bit-nginx-utf8-test fluent-bit-php-json-pipeline-test fluent-bit-config-check fluent-bit-contract-test ## Run every fluent-bit check
+test: fluent-bit-harbor-test fluent-bit-host-nginx-test fluent-bit-nginx-pipeline-test fluent-bit-nginx-utf8-test fluent-bit-php-json-pipeline-test fluent-bit-event-time-test fluent-bit-config-check fluent-bit-contract-test ## Run every fluent-bit check
+
+fluent-bit-event-time-test: ## Preserve original event time and timezone through the Lua filter
+	@output=$$(timeout 6 docker run --rm --network none $(RUN_LIMITS) $(RUN_MOUNT) \
+		"$(FLUENT_BIT_IMAGE)" -c /fluent-bit/etc/tests/event-time.conf 2>&1); \
+	status=$$?; \
+	if [ "$$status" -ne 0 ] && [ "$$status" -ne 124 ]; then printf '%s\n' "$$output" >&2; exit 1; fi; \
+	[ "$$(printf '%s\n' "$$output" | grep -c '"observed_at":1767312245.123456')" = 2 ] \
+		|| { printf '%s\n' "$$output" >&2; exit 1; }; \
+	printf '%s\n' "$$output" | grep -q '"observed_at":1767312245.789' \
+		|| { printf '%s\n' "$$output" >&2; exit 1; }; \
+	echo "event time: OK"
 
 # Invalid UTF-8 in a request is percent-encoded, valid multibyte text stays intact.
 fluent-bit-nginx-utf8-test: ## invalid UTF-8 bytes must not be dropped or mangled
@@ -95,6 +106,12 @@ fluent-bit-nginx-pipeline-test: ## nginx access/error normalization and noise fi
 	if printf '%s\n' "$$output" | grep '"request_uri":"/x"' | grep -q '"server_name"'; then fail "server_name equal to host was kept"; fi; \
 	if printf '%s\n' "$$output" | grep -q 'realip_remote_addr'; then fail "realip_remote_addr was not dropped"; fi; \
 	printf '%s\n' "$$output" | grep -q '"remote_port":51234' || fail "remote_port was not kept as a number"; \
+	printf '%s\n' "$$output" | grep -q '"msec":1788420669.123' || fail "msec was not kept as a number"; \
+	printf '%s\n' "$$output" | grep '"request_uri":"/orders"' | grep -q '"connection_requests":7' || fail "connection_requests was not coerced to a number"; \
+	printf '%s\n' "$$output" | grep '"request_uri":"/orders"' | grep -q '"has_cookie":1' || fail "has_cookie was not coerced to a number"; \
+	if printf '%s\n' "$$output" | grep '"request_uri":"/orders"' | grep -q 'sec_fetch_site'; then fail "empty sec_fetch_site was not dropped"; fi; \
+	if printf '%s\n' "$$output" | grep -q 'app.css'; then fail "static asset was not dropped"; fi; \
+	printf '%s\n' "$$output" | grep -q '"request_id":"0123456789abcdef0123456789abcdef"' || fail "request_id was not kept"; \
 	if printf '%s\n' "$$output" | grep -q 'x_forwarded_for'; then fail "x_forwarded_for was not dropped"; fi; \
 	echo "nginx pipeline: OK"
 
@@ -137,14 +154,19 @@ fluent-bit-contract-test: ## Test fail-closed shell and native parser contracts
 # Boot the production config for real (tmpfs for the tail state DB; tail paths are
 # absent here, their warnings are expected). Fails on any init error.
 fluent-bit-config-check: ## Boot the production config
-	@output=$$(timeout 8 docker run --rm --network none $(RUN_LIMITS) $(RUN_MOUNT) \
-		--tmpfs /var/lib/fluent-bit \
+	@mkdir -p tmp; cfg=$$(mktemp "$(CURDIR)/tmp/fluent-config-check.XXXXXX"); \
+	sed -e 's/Log_Level    warn/Log_Level    info/' -e 's@Parsers_File parsers.conf@Parsers_File /fluent-bit/etc/parsers.conf@' -e 's@INCLUDE service.d/@INCLUDE /fluent-bit/etc/service.d/@' fluent-bit/fluent-bit.conf > "$$cfg"; \
+	output=$$(timeout 8 docker run --rm --network none --user 1000:1000 $(RUN_LIMITS) $(RUN_MOUNT) \
+		-v "$$cfg:/fixture-config.conf:ro" \
+		--tmpfs /var/lib/fluent-bit:uid=1000,gid=1000 \
+		--tmpfs /var/log/mysql_logs:uid=1000,gid=1000 --tmpfs /var/log/json:uid=1000,gid=1000 \
+		--tmpfs /var/log/harbor:uid=1000,gid=1000 --tmpfs /var/log/host-nginx:uid=1000,gid=1000 \
 		-e TZ=UTC -e HOST_IP=127.0.0.1 -e HOST_NAME=fluent-bit-config-test \
 		-e COMPOSE_PROJECT_NAME=fluent-bit-config-test -e COMPOSE_PROFILES=test \
 		-e GRAYLOG_HOST=graylog.invalid -e GRAYLOG_URI=/gelf -e GRAYLOG_PORT=443 \
-		"$(FLUENT_BIT_IMAGE)" -v -c /fluent-bit/etc/fluent-bit.conf 2>&1); \
+		"$(FLUENT_BIT_IMAGE)" -v -c /fixture-config.conf 2>&1); \
 	status=$$?; \
-	initialized=$$(printf '%s\n' "$$output" | grep -cE '\[engine\] started \(pid=[0-9]+\)|\[input:[^]]+\] (read error|initialized)' || true); \
+	initialized=$$(printf '%s\n' "$$output" | grep -cE '\[engine\] started \(pid=[0-9]+\)|\[sp\] stream processor started|\[input:[^]]+\] initialized' || true); \
 	if printf '%s\n' "$$output" | grep -Eq 'initialization failed|invalid lua content|aborting'; then printf '%s\n' "$$output" >&2; exit 1; fi; \
 	if [ "$$status" -ne 0 ] && [ "$$status" -ne 124 ]; then printf '%s\n' "$$output" >&2; exit 1; fi; \
 	if [ "$$initialized" -eq 0 ]; then printf '%s\n' "$$output" >&2; exit 1; fi; \

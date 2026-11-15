@@ -85,7 +85,8 @@ local NGINX_KEY_ALIAS = {
 local NGINX_NUMERIC = {
     status = true, body_bytes_sent = true, request_length = true,
     request_time = true, upstream_connect_time = true, remote_port = true,
-    upstream_header_time = true, upstream_response_time = true,
+    upstream_header_time = true, upstream_response_time = true, msec = true,
+    connection_requests = true, server_port = true, has_cookie = true, has_authorization = true, log_v = true,
 }
 
 local function _nginx_to_number(v)
@@ -125,7 +126,11 @@ function normalize_nginx_access(tag, ts, record)
             if n ~= nil then record[k] = n else record[k] = nil end
         end
     end
-    for _, k in ipairs({"remote_user", "referer", "x_forwarded_for", "upstream_addr"}) do
+    for _, k in ipairs({"remote_user", "referer", "x_forwarded_for", "upstream_addr",
+                        "accept", "accept_language", "accept_encoding", "sec_ch_ua", "sec_ch_ua_mobile", "sec_ch_ua_platform",
+                        "sec_fetch_site", "sec_fetch_mode", "sec_fetch_dest", "sec_fetch_user", "ssl_protocol", "ssl_alpn",
+                        "ssl_session_reused", "x_client_ssl_protocol", "x_client_ssl_alpn", "x_client_ssl_session_reused",
+                        "x_client_connection_requests"}) do
         if record[k] == "-" or record[k] == "" then record[k] = nil end
     end
     return 1, ts, record
@@ -159,10 +164,20 @@ local NGINX_NOISE_PREFIX = {
 }
 local NGINX_NOISE_SLOW_SECONDS = 1.0
 
+-- Static assets are never collected (no signal, large volume). Same list as the nginx map $access_not_static;
+-- .html/.json/.jsonl and probe-like extensions (.env, .php, .zip, ...) stay.
+local NGINX_STATIC_EXT = {
+    css = true, js = true, mjs = true, map = true, png = true, jpg = true, jpeg = true, gif = true, webp = true,
+    avif = true, svg = true, ico = true, bmp = true, woff = true, woff2 = true, ttf = true, otf = true, eot = true,
+    mp3 = true, mp4 = true, webm = true, ogg = true, wav = true, m4a = true, mov = true, avi = true,
+}
+
 function drop_nginx_access_noise(tag, ts, record)
     local uri = record["request_uri"]
     if type(uri) ~= "string" then return 0, ts, record end
     local path = string.match(uri, "^([^?]*)") or uri
+    local ext = string.match(path, "%.(%w+)$")
+    if ext and NGINX_STATIC_EXT[string.lower(ext)] then return -1, ts, record end
     local noisy = NGINX_NOISE_EXACT[path] or false
     if not noisy then
         for _, prefix in ipairs(NGINX_NOISE_PREFIX) do
@@ -581,7 +596,8 @@ end
 function normalize_event_time(tag, ts, record)
     local dt = record["datetime"]
     local iso = parse_iso8601(dt)
-    local new_ts = iso or parse_nginx_time(record["time_local"])
+    local nginx_msec = tag == "gl.nginx" and tonumber(record["msec"]) or nil
+    local new_ts = iso or nginx_msec or parse_nginx_time(record["time_local"])
 
     local changed = false
 
@@ -616,7 +632,7 @@ function normalize_event_time(tag, ts, record)
     end
 
     if new_ts then
-        return 2, new_ts, record
+        return 1, new_ts, record
     elseif changed then
         return 1, ts, record
     end

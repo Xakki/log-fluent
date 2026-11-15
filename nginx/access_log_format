@@ -1,18 +1,38 @@
 # Canonical nginx access log format for every project/host (single source of truth).
 # Include it instead of defining your own log_format, then:
 #   access_log /dev/stdout json_combined;
-# remote_port: client port ($remote_port; realip proxy_protocol makes it the real one).
+# remote_port: client port ($remote_port; realip proxy_protocol makes it the real one). Quoted on purpose: behind a plain-HTTP
+#   realip hop ($http_x_forwarded_for) the variable is EMPTY and an unquoted value would break the JSON line; fluent-bit turns it into a number.
+# msec: request end time with millisecond resolution, epoch seconds ($msec); time_local is dropped by the pipeline and
+#   has one-second resolution. request_id: 32 hex chars unique per request ($request_id), also usable as X-Request-Id upstream.
 # Key names match what fluent-bit/service.d/nginx.conf expects; legacy names
 # (http_user_agent, http_host, http_referrer, request_line, ...) are still renamed
 # there, so older configs keep working until they are migrated.
 # "message" is the raw request line ("GET /uri?x=1 HTTP/1.1"); fluent-bit splits it
 # into request_method / request_uri / request_proto (message is then empty and is sent as "-").
+# log_v: format version (2 = request headers + connection facts present). An absent header field with log_v>=2 means the client did not
+#   send it; with no log_v the record predates these fields and the header is unknown.
 # Byte-safe variants (njs request_line/request_uri_b64) may add fields on top.
+# Static assets are not logged (16% of the volume, no traffic-quality signal): use `if=$access_not_static` (shared nginx
+# combines it with its privacy map). .html/.json/.jsonl and probes such as .env/.php/.zip are NOT assets and stay logged.
+map $request_uri $access_not_static {
+    default 1;
+    "~*^[^?]*\.(css|js|mjs|map|png|jpe?g|gif|webp|avif|svg|ico|bmp|woff2?|ttf|otf|eot|mp3|mp4|webm|ogg|wav|m4a|mov|avi)(\?|$)" 0;
+}
+# Cookie / Authorization: only whether they were sent, never the values.
+map $http_cookie $access_has_cookie { "" 0; default 1; }
+map $http_authorization $access_has_authorization { "" 0; default 1; }
+# Client TLS/connection facts behind a second hop: the TLS-terminating proxy forwards them as X-Client-* headers
+# (nginx/proxy_client_facts.conf). They are logged as x_client_* next to server_port; the CONSUMER (export) trusts them only
+# for the proxy-only port(s), because on any other listener a client can send these headers itself.
 log_format json_combined escape=json
   '{'
     '"time_local":"$time_local",'
+    '"log_v":2,'
+    '"msec":$msec,'
+    '"request_id":"$request_id",'
     '"remote_addr":"$remote_addr",'
-    '"remote_port":$remote_port,'
+    '"remote_port":"$remote_port",'
     '"remote_user":"$remote_user",'
     '"request_host":"$host",'
     '"server_name":"$server_name",'
@@ -26,5 +46,26 @@ log_format json_combined escape=json
     '"upstream_header_time":"$upstream_header_time",'
     '"upstream_response_time":"$upstream_response_time",'
     '"user_agent":"$http_user_agent",'
-    '"referer":"$http_referer"'
+    '"referer":"$http_referer",'
+    '"accept":"$http_accept",'
+    '"accept_language":"$http_accept_language",'
+    '"accept_encoding":"$http_accept_encoding",'
+    '"sec_ch_ua":"$http_sec_ch_ua",'
+    '"sec_ch_ua_mobile":"$http_sec_ch_ua_mobile",'
+    '"sec_ch_ua_platform":"$http_sec_ch_ua_platform",'
+    '"sec_fetch_site":"$http_sec_fetch_site",'
+    '"sec_fetch_mode":"$http_sec_fetch_mode",'
+    '"sec_fetch_dest":"$http_sec_fetch_dest",'
+    '"sec_fetch_user":"$http_sec_fetch_user",'
+    '"has_cookie":$access_has_cookie,'
+    '"has_authorization":$access_has_authorization,'
+    '"server_port":$server_port,'
+    '"connection_requests":$connection_requests,'
+    '"ssl_protocol":"$ssl_protocol",'
+    '"ssl_alpn":"$ssl_alpn_protocol",'
+    '"ssl_session_reused":"$ssl_session_reused",'
+    '"x_client_ssl_protocol":"$http_x_client_ssl_protocol",'
+    '"x_client_ssl_alpn":"$http_x_client_ssl_alpn",'
+    '"x_client_ssl_session_reused":"$http_x_client_ssl_session_reused",'
+    '"x_client_connection_requests":"$http_x_client_connection_requests"'
   '}';

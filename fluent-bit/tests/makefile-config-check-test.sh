@@ -2,8 +2,8 @@
 set -eu
 
 repo_dir=$(CDPATH= cd -- "$(dirname "$0")/../.." && pwd)
-fake_bin=$(mktemp -d)
-trap 'rm -rf "$fake_bin"' EXIT
+mkdir -p "$repo_dir/tmp"
+fake_bin=$(mktemp -d "$repo_dir/tmp/config-check.XXXXXX")
 
 cat >"$fake_bin/docker" <<'SCRIPT'
 #!/bin/sh
