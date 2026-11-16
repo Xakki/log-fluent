@@ -76,7 +76,7 @@ x-logging: &_logging
             fluentd-address: "${EXT_FLUENT_PORT:-127.0.0.1:24224}"
             fluentd-async: "true"
             tag: "service.{{.Name}}"
-            # Forwarded as flat docker_* + log_format. Do NOT use env: — host/hostname/
+            # Forwarded as flat docker_* plus tier and log_format. Do NOT use env: — host/
             # docker_profile are set globally from fluent-bit's own env (see Configuration).
             labels: "com.docker.compose.service,com.docker.compose.project,com.docker.compose.image,tier,log_format"
 
@@ -112,7 +112,7 @@ tail mariadb slowlog ───┘          └─ level / timestamp / GELF-flatt
    - **File tail** — universal NDJSON (`/var/log/json/*.ndjson`) and the MariaDB
      slowlog (mysqld can't write it to stderr).
 2. **Flatten metadata.** Driver labels (`com.docker.compose.*`, `tier`, `log_format`)
-   become flat `docker_*` fields. `host`/`hostname`/`docker_profile` are added globally
+   become flat `docker_*` fields plus `tier` and `log_format`. `host`/`docker_profile` are added globally
    from the fluent-bit container's env (`host` is mandatory — otherwise GELF would use the
    docker-bridge IP).
 3. **Route by `log_format`** → tag `gl.<log_format>` (see below).
@@ -211,8 +211,8 @@ Set these in `.env` (see `.env_example`):
 | `GRAYLOG_HOST`           | Graylog GELF/HTTP host                          | `graylog.example.com` |
 | `GRAYLOG_URI`            | GELF endpoint                                   | `/gelf` |
 | `GRAYLOG_PORT`           | GELF/HTTP port                                  | `443` |
-| `HOST_NAME`              | logical host name (GELF `hostname`)             | `example_host` |
-| `HOST_IP`                | host IP (GELF `host` / source)                  | `127.0.0.1` |
+| `HOST_NAME`              | logical host name (GELF `host`, Graylog `source`)             | `example_host` |
+| `HOST_IP`                | host IP (Graylog `host_ip`)                  | `127.0.0.1` |
 | `COMPOSE_PROJECT_NAME`   | project name (container/field prefix)           | `example` |
 | `COMPOSE_PROFILES`       | profile → `docker_profile`                      | `dev` |
 

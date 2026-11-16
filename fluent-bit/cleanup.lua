@@ -4,10 +4,10 @@
 local _ENV_PROJECT = os.getenv("COMPOSE_PROJECT_NAME") or "?"
 
 -- Canonical docker_* fields for tail-input records (files have no docker driver
--- labels). host/hostname/docker_profile are set globally by [FILTER] modify Add.
+-- labels). host and docker_profile are set globally by [FILTER] modify Add.
 local function _fill_common(record, service, tier, log_format, cn_suffix)
     record["docker_service"]   = service
-    record["docker_tier"]      = tier
+    record["tier"]             = tier
     record["log_format"]       = log_format
     record["docker_project"]   = _ENV_PROJECT
     record["docker_container"] = _ENV_PROJECT .. cn_suffix
@@ -436,7 +436,7 @@ local SKIP = {
     container_id = true, docker_container = true, log_source = true,
     short_message = true, message = true, log = true,
     docker_service = true, docker_project = true, docker_image = true,
-    docker_tier = true, docker_profile = true,
+    tier = true, docker_profile = true,
     log_format = true, log_kind = true,
     level_php = true, level_name = true, syslog_severity = true,
     channel = true, datetime = true, ["@timestamp"] = true,
@@ -741,5 +741,17 @@ end
 function host_nginx_stream(tag, ts, record)
     if record["docker_service"] ~= "host-nginx" then return 0, ts, record end
     if record["status"] ~= nil then record["log_source"] = "stdout" else record["log_source"] = "stderr" end
+    return 1, ts, record
+end
+
+-- Host identity is the GELF host (Graylog source); retain distinct original names.
+function normalize_identity_and_tier(tag, ts, record)
+    local host = os.getenv("HOST_NAME")
+    for _, key in ipairs({"hostname", "host_name"}) do
+        if host and record[key] == host then record[key] = nil end
+    end
+    if record["tier"] == nil then record["tier"] = record["docker_tier"] end
+    record["docker_tier"] = nil
+    if tag == "gl.nginx" then record["tier"] = "nginx" end
     return 1, ts, record
 end
